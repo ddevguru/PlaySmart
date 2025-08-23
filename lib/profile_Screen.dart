@@ -224,7 +224,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
       }
 
       var options = {
-        'key': 'rzp_live_bTRCrWs2VHLi7o', // Replace with your Razorpay Key ID
+        'key': 'rzp_live_fgQr0ACWFbL4pN', // Replace with your Razorpay Key ID
         'amount': (amount * 100).toInt(), // Amount in paise
         'order_id': orderData['order_id'],
         'name': 'Esportswala',
@@ -563,138 +563,137 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     );
   }
 
-  void _showWithdrawForm() {
-    final TextEditingController amountController = TextEditingController();
-    final TextEditingController bankNameController = TextEditingController();
-    final TextEditingController accountNumberController = TextEditingController();
-    final TextEditingController ifscCodeController = TextEditingController();
-    final TextEditingController upiIdController = TextEditingController();
+ void _showWithdrawForm() {
+  final TextEditingController amountController = TextEditingController();
+  final TextEditingController bankNameController = TextEditingController();
+  final TextEditingController accountNumberController = TextEditingController();
+  final TextEditingController ifscCodeController = TextEditingController();
+  final TextEditingController upiIdController = TextEditingController();
 
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.account_balance,
-                  color: Colors.blue,
-                  size: 24,
-                ),
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Withdrawal Request',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildWithdrawField(
-                  controller: amountController,
-                  label: 'Amount (₹)',
-                  icon: Icons.currency_rupee,
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 12),
-                _buildWithdrawField(
-                  controller: bankNameController,
-                  label: 'Bank Name',
-                  icon: Icons.account_balance,
-                ),
-                const SizedBox(height: 12),
-                _buildWithdrawField(
-                  controller: accountNumberController,
-                  label: 'Account Number',
-                  icon: Icons.credit_card,
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 12),
-                _buildWithdrawField(
-                  controller: ifscCodeController,
-                  label: 'IFSC Code',
-                  icon: Icons.code,
-                ),
-                const SizedBox(height: 12),
-                _buildWithdrawField(
-                  controller: upiIdController,
-                  label: 'UPI ID (Optional)',
-                  icon: Icons.payment,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.poppins(
-                  color: Colors.red,
-                  fontWeight: FontWeight.w500,
-                ),
+              child: const Icon(
+                Icons.account_balance,
+                color: Colors.blue,
+                size: 24,
               ),
             ),
-            ElevatedButton(
-              onPressed: () {
-                final amount = double.tryParse(amountController.text);
-                if (amount != null &&
-                    amount > 0 &&
-                    bankNameController.text.isNotEmpty &&
-                    accountNumberController.text.isNotEmpty &&
-                    ifscCodeController.text.isNotEmpty) {
-                  _submitWithdrawalRequest(
-                    amount,
-                    bankNameController.text,
-                    accountNumberController.text,
-                    ifscCodeController.text,
-                    upiIdController.text,
-                  );
-                  Navigator.pop(context);
-                } else {
-                  _showCustomSnackBar(
-                    'Please fill all required fields correctly',
-                    isError: true,
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              ),
+            const SizedBox(width: 12),
+            Expanded(
               child: Text(
-                'Submit Request',
+                'Withdrawal Request',
                 style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
                 ),
               ),
             ),
           ],
-        );
-      },
-    );
-  }
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildWithdrawField(
+                controller: amountController,
+                label: 'Amount (₹, Minimum ₹50)',
+                icon: Icons.currency_rupee,
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              _buildWithdrawField(
+                controller: bankNameController,
+                label: 'Bank Name',
+                icon: Icons.account_balance,
+              ),
+              const SizedBox(height: 12),
+              _buildWithdrawField(
+                controller: accountNumberController,
+                label: 'Account Number',
+                icon: Icons.credit_card,
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              _buildWithdrawField(
+                controller: ifscCodeController,
+                label: 'IFSC Code',
+                icon: Icons.code,
+              ),
+              const SizedBox(height: 12),
+              _buildWithdrawField(
+                controller: upiIdController,
+                label: 'UPI ID (Optional)',
+                icon: Icons.payment,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(
+                color: Colors.red,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final amount = double.tryParse(amountController.text);
+              if (amount != null &&
+                  amount >= 50 &&
+                  bankNameController.text.isNotEmpty &&
+                  accountNumberController.text.isNotEmpty &&
+                  ifscCodeController.text.isNotEmpty) {
+                _submitWithdrawalRequest(
+                  amount,
+                  bankNameController.text,
+                  accountNumberController.text,
+                  ifscCodeController.text,
+                  upiIdController.text,
+                );
+                Navigator.pop(context);
+              } else {
+                _showCustomSnackBar(
+                  'Please fill all required fields correctly and ensure amount is at least ₹50',
+                  isError: true,
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: Text(
+              'Submit Request',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
 
   Widget _buildWithdrawField({
     required TextEditingController controller,
@@ -728,6 +727,15 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     String upiId,
   ) async {
     try {
+      // Validate minimum withdrawal amount
+      if (amount < 50) {
+        _showCustomSnackBar(
+          'Minimum withdrawal amount is ₹50',
+          isError: true,
+        );
+        return;
+      }
+
       // Validate IFSC code format
       final ifscRegex = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
       if (!ifscRegex.hasMatch(ifscCode)) {
@@ -747,6 +755,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         'upi_id': upiId.isEmpty ? null : upiId,
       });
       print('Withdrawal request: $requestBody');
+      
+      // Show loading dialog
+      _showLoadingDialog('Submitting withdrawal request...');
+
       final response = await http.post(
         Uri.parse('$BASE_URL/withdraw.php'),
         headers: {
@@ -754,12 +766,19 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
           'Accept': 'application/json',
         },
         body: requestBody,
-      );
+      ).timeout(const Duration(seconds: 15));
+
       print('Withdrawal response: ${response.statusCode} - ${response.body}');
+      Navigator.pop(context); // Dismiss loading dialog
+
       final data = jsonDecode(response.body);
       if (data['success'] == true) {
-        _showCustomSnackBar('Withdrawal request submitted successfully');
-        await _fetchUserData(); // Refresh user data to update wallet balance
+        _showCustomSnackBar(
+          'Withdrawal request submitted successfully. It will be processed soon.',
+        );
+        // Do not call _fetchUserData() as balance is not updated immediately
+      } else if (data['error_code'] == 'outside_withdrawal_window') {
+        _showOutsideWithdrawalWindowDialog();
       } else {
         _showCustomSnackBar(
           'Failed to submit withdrawal request: ${data['message'] ?? 'Unknown error'}',
@@ -768,11 +787,112 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
       }
     } catch (e) {
       print('Error submitting withdrawal request: $e');
+      Navigator.pop(context); // Dismiss loading dialog
       _showCustomSnackBar(
         'Error submitting withdrawal request: $e',
         isError: true,
       );
     }
+  }
+
+  void _showOutsideWithdrawalWindowDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 10,
+                  offset: Offset(0, 5),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.access_time,
+                    color: Colors.white,
+                    size: 50,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Withdrawal Time Restricted',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Withdrawals are only allowed between\n11:00 AM and 5:00 PM IST.',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white70,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Please try again during the allowed hours.',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                    elevation: 2,
+                  ),
+                  child: Text(
+                    'OK',
+                    style: GoogleFonts.poppins(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _logout() async {
@@ -1374,10 +1494,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         const SizedBox(height: 15),
         _buildProfileField(
           label: 'Helpline Number',
-          value: '+91 94209-16672',
+          value: '+91 86250-06672',
           icon: Icons.support_agent,
           onPressed: () async {
-            final Uri phoneUri = Uri(scheme: 'tel', path: '+919420916672');
+            final Uri phoneUri = Uri(scheme: 'tel', path: '+918625006672');
             if (await canLaunchUrl(phoneUri)) {
               await launchUrl(phoneUri);
               _showCustomSnackBar('Initiating call to helpline');
@@ -1417,7 +1537,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
           icon: Icons.share,
           color: Colors.blue[700]!,
           onPressed: () async {
-            final String message = 'Check out PlaySmart! Download now: https://esportswala.app';
+            final String message = 'Check out PlaySmart! Download now: https://play.google.com/store/apps/details?id=com.codify.playsmart&pcampaignid=web_share';
             final Uri whatsappUri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(message)}');
             if (await canLaunchUrl(whatsappUri)) {
               await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);

@@ -1,13 +1,20 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:playsmart/Auth/login_screen.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+
 import 'package:playsmart/Models/contest.dart';
+import 'package:playsmart/Models/job.dart';
+import 'package:playsmart/Models/job_application.dart';
 import 'package:playsmart/controller/mega-contest-controller.dart';
 import 'package:playsmart/controller/mini-contest-controller.dart';
+import 'package:playsmart/controller/job_controller.dart';
+import 'package:playsmart/controller/job_application_controller.dart';
 import 'package:playsmart/profile_Screen.dart';
 import 'package:playsmart/splash_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,6 +22,7 @@ import 'dart:convert';
 import 'quiz_screen.dart';
 import 'mega_quiz_screen.dart';
 import 'mega_result_screen.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
@@ -29,13 +37,24 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
+  late ScrollController _jobApplicationsScrollController;
+  late Timer _autoScrollTimer;
   double userBalance = 0.0;
   List<Contest> miniContests = [];
   List<Contest> megaContests = [];
+  List<Job> jobs = [];
+  List<JobApplication> jobApplications = [];
+  Map<int, String> userJobApplications = {}; // Track user's job applications
+  Job? _currentJobApplication; // Track current job being applied for
   final ContestController _miniContestController = ContestController();
   final MegaContestController _megaContestController = MegaContestController();
   Timer? _refreshTimer;
   Map<int, Map<String, dynamic>> _megaContestStatus = {};
+  late Razorpay _razorpay;
+  
+  // File paths for job application
+  String? _selectedPhotoPath;
+  String? _selectedResumePath;
 
   final List<List<Color>> cardGradients = [
     [Color(0xFFFF4E50), Color(0xFFF9D423)],
@@ -51,10 +70,88 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _jobApplicationsScrollController = ScrollController();
     _initializeAnimations();
+    _initializeRazorpay();
     fetchUserBalance();
     fetchContests();
+    fetchJobApplications();
+    fetchJobs();
     _startRefreshTimer();
+    _startAutoScroll();
+    
+    // Add sample job applications for testing
+    userJobApplications[1] = 'pending';
+    userJobApplications[2] = 'shortlisted';
+    
+    // Add sample job applications for testing display
+    print('DEBUG: Setting up sample job applications...');
+    jobApplications = [
+      JobApplication(
+        id: 1,
+        jobId: 1,
+        companyName: 'Google',
+        companyLogoUrl: 'https://playsmart.co.in/uploads/google_logo.png',
+        studentName: 'Rahul Sharma',
+        district: 'Mumbai',
+        package: '12LPA',
+        profile: 'Product Manager',
+        photoPath: 'uploads/photos/rahul_sharma.jpg',
+        resumePath: 'uploads/resumes/rahul_sharma_resume.pdf',
+        email: 'rahul.sharma@email.com',
+        phone: '+91-9876543210',
+        experience: '5 years',
+        skills: 'Product Management, Analytics, Leadership',
+        paymentId: 'pay_123456789',
+        applicationStatus: 'shortlisted',
+        appliedDate: DateTime.now().subtract(Duration(days: 2)),
+        isActive: true,
+      ),
+      JobApplication(
+        id: 2,
+        jobId: 2,
+        companyName: 'Spotify',
+        companyLogoUrl: 'https://playsmart.co.in/uploads/spotify_logo.png',
+        studentName: 'Priya Patel',
+        district: 'Pune',
+        package: '12LPA',
+        profile: 'UI Designer',
+        photoPath: 'uploads/photos/priya_patel.jpg',
+        resumePath: 'uploads/resumes/priya_patel_resume.pdf',
+        email: 'priya.patel@email.com',
+        phone: '+91-9876543211',
+        experience: '4 years',
+        skills: 'Product Strategy, User Research, Data Analysis',
+        paymentId: 'pay_123456790',
+        applicationStatus: 'pending',
+        appliedDate: DateTime.now().subtract(Duration(days: 1)),
+        isActive: true,
+      ),
+      JobApplication(
+        id: 3,
+        jobId: 3,
+        companyName: 'Microsoft',
+        companyLogoUrl: 'https://playsmart.co.in/uploads/microsoft_logo.png',
+        studentName: 'Amit Kumar',
+        district: 'Delhi',
+        package: '15LPA',
+        profile: 'Software Engineer',
+        photoPath: 'uploads/photos/amit_kumar.jpg',
+        resumePath: 'uploads/resumes/amit_kumar_resume.pdf',
+        email: 'amit.kumar@email.com',
+        phone: '+91-9876543212',
+        experience: '6 years',
+        skills: 'UI/UX Design, Figma, Prototyping',
+        paymentId: 'pay_123456791',
+        applicationStatus: 'accepted',
+        appliedDate: DateTime.now().subtract(Duration(days: 3)),
+        isActive: true,
+      ),
+    ];
+    
+    print('DEBUG: Sample data setup complete. jobApplications.length = ${jobApplications.length}');
+    
+
   }
 
   void _initializeAnimations() {
@@ -88,14 +185,696 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     _animationController.forward();
   }
 
+  void _initializeRazorpay() {
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) {
+    print('Payment Success: ${response.paymentId}');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Payment successful! Job application submitted.'),
+        backgroundColor: Colors.green,
+      ),
+    );
+    
+    // Store the job application status locally
+    if (_currentJobApplication != null) {
+      userJobApplications[_currentJobApplication!.id] = 'pending';
+      setState(() {});
+      
+      // Upload files if they were selected
+      if (_selectedPhotoPath != null && _selectedResumePath != null) {
+        _uploadFiles(
+          _currentJobApplication!,
+          _selectedPhotoPath!,
+          _selectedResumePath!,
+        );
+      }
+    }
+    
+    print('Payment ID: ${response.paymentId}');
+    print('Payment Signature: ${response.signature}');
+    
+    // Refresh job applications to show the new one
+    fetchJobApplications();
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    print('Payment Error: ${response.code} - ${response.message}');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Payment failed: ${response.message}'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    print('External Wallet: ${response.walletName}');
+  }
+
+  void _showJobApplicationModal(Job job) {
+    _currentJobApplication = job; // Set current job for tracking
+    
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController emailController = TextEditingController();
+    final TextEditingController phoneController = TextEditingController();
+    final TextEditingController experienceController = TextEditingController();
+    final TextEditingController skillsController = TextEditingController();
+    
+    // Reset file paths for new application
+    _selectedPhotoPath = null;
+    _selectedResumePath = null;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Apply for ${job.jobTitle}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 20),
+                    
+                    // Job Details Card
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Company: ${job.companyName}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Package: ${job.package}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              color: Colors.white70,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Location: ${job.location}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    
+                    // Application Form
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Personal Details',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 16),
+                          
+                          // Name Field
+                          TextFormField(
+                            controller: nameController,
+                            style: GoogleFonts.poppins(color: Colors.white),
+                            decoration: InputDecoration(
+                              labelText: 'Full Name',
+                              labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.yellow),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 12),
+                          
+                          // Email Field
+                          TextFormField(
+                            controller: emailController,
+                            style: GoogleFonts.poppins(color: Colors.white),
+                            decoration: InputDecoration(
+                              labelText: 'Email Address',
+                              labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.yellow),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 12),
+                          
+                          // Phone Field
+                          TextFormField(
+                            controller: phoneController,
+                            style: GoogleFonts.poppins(color: Colors.white),
+                            decoration: InputDecoration(
+                              labelText: 'Phone Number',
+                              labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.yellow),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 12),
+                          
+                          // Experience Field
+                          TextFormField(
+                            controller: experienceController,
+                            style: GoogleFonts.poppins(color: Colors.white),
+                            decoration: InputDecoration(
+                              labelText: 'Years of Experience',
+                              labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.yellow),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 12),
+                          
+                                                     // Skills Field
+                           TextFormField(
+                             controller: skillsController,
+                             style: GoogleFonts.poppins(color: Colors.white),
+                             maxLines: 3,
+                             decoration: InputDecoration(
+                               labelText: 'Skills & Technologies',
+                               labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                               border: OutlineInputBorder(
+                                 borderRadius: BorderRadius.circular(8),
+                                 borderSide: BorderSide(color: Colors.white30),
+                               ),
+                               enabledBorder: OutlineInputBorder(
+                                 borderRadius: BorderRadius.circular(8),
+                                 borderSide: BorderSide(color: Colors.white30),
+                               ),
+                               focusedBorder: OutlineInputBorder(
+                                 borderRadius: BorderRadius.circular(8),
+                                 borderSide: BorderSide(color: Colors.yellow),
+                               ),
+                             ),
+                           ),
+                           SizedBox(height: 12),
+                           
+                           // Photo Upload
+                           Container(
+                             padding: EdgeInsets.all(12),
+                             decoration: BoxDecoration(
+                               color: Colors.white.withOpacity(0.05),
+                               borderRadius: BorderRadius.circular(8),
+                               border: Border.all(color: Colors.white30),
+                             ),
+                             child: Column(
+                               crossAxisAlignment: CrossAxisAlignment.start,
+                               children: [
+                                 Text(
+                                   'Profile Photo',
+                                   style: GoogleFonts.poppins(
+                                     color: Colors.white,
+                                     fontSize: 14,
+                                     fontWeight: FontWeight.w600,
+                                   ),
+                                 ),
+                                 SizedBox(height: 8),
+                                 GestureDetector(
+                                   onTap: () async {
+                                     try {
+                                       final ImagePicker picker = ImagePicker();
+                                       final XFile? image = await picker.pickImage(
+                                         source: ImageSource.gallery,
+                                         maxWidth: 512,
+                                         maxHeight: 512,
+                                         imageQuality: 80,
+                                       );
+                                       
+                                       if (image != null) {
+                                         setState(() {
+                                           _selectedPhotoPath = image.path;
+                                         });
+                                         ScaffoldMessenger.of(context).showSnackBar(
+                                           SnackBar(
+                                             content: Text('Photo selected: ${image.name}'),
+                                             backgroundColor: Colors.green,
+                                           ),
+                                         );
+                                       }
+                                     } catch (e) {
+                                       ScaffoldMessenger.of(context).showSnackBar(
+                                         SnackBar(
+                                           content: Text('Error selecting photo: $e'),
+                                           backgroundColor: Colors.red,
+                                         ),
+                                       );
+                                     }
+                                   },
+                                   child: Container(
+                                     width: double.infinity,
+                                     height: 80,
+                                     decoration: BoxDecoration(
+                                       color: Colors.white.withOpacity(0.1),
+                                       borderRadius: BorderRadius.circular(8),
+                                       border: Border.all(color: Colors.white30, style: BorderStyle.solid),
+                                     ),
+                                     child: _selectedPhotoPath != null
+                                         ? ClipRRect(
+                                             borderRadius: BorderRadius.circular(8),
+                                             child: Image.file(
+                                               File(_selectedPhotoPath!),
+                                               fit: BoxFit.cover,
+                                               width: double.infinity,
+                                               height: 80,
+                                             ),
+                                           )
+                                         : Column(
+                                             mainAxisAlignment: MainAxisAlignment.center,
+                                             children: [
+                                               Icon(Icons.camera_alt, color: Colors.white70, size: 32),
+                                               SizedBox(height: 4),
+                                               Text(
+                                                 'Tap to upload photo',
+                                                 style: GoogleFonts.poppins(
+                                                   color: Colors.white70,
+                                                   fontSize: 12,
+                                                 ),
+                                               ),
+                                             ],
+                                           ),
+                                   ),
+                                 ),
+                               ],
+                             ),
+                           ),
+                           SizedBox(height: 12),
+                           
+                           // Resume Upload
+                           Container(
+                             padding: EdgeInsets.all(12),
+                             decoration: BoxDecoration(
+                               color: Colors.white.withOpacity(0.05),
+                               borderRadius: BorderRadius.circular(8),
+                               border: Border.all(color: Colors.white30),
+                             ),
+                             child: Column(
+                               crossAxisAlignment: CrossAxisAlignment.start,
+                               children: [
+                                 Text(
+                                   'Resume/CV',
+                                   style: GoogleFonts.poppins(
+                                     color: Colors.white,
+                                     fontSize: 14,
+                                     fontWeight: FontWeight.w600,
+                                   ),
+                                 ),
+                                 SizedBox(height: 8),
+                                 GestureDetector(
+                                   onTap: () async {
+                                     try {
+                                       FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                         type: FileType.custom,
+                                         allowedExtensions: ['pdf', 'doc', 'docx'],
+                                         allowMultiple: false,
+                                       );
+                                       
+                                       if (result != null) {
+                                         setState(() {
+                                           _selectedResumePath = result.files.single.path;
+                                         });
+                                         ScaffoldMessenger.of(context).showSnackBar(
+                                           SnackBar(
+                                             content: Text('Resume selected: ${result.files.single.name}'),
+                                             backgroundColor: Colors.green,
+                                           ),
+                                         );
+                                       }
+                                     } catch (e) {
+                                       ScaffoldMessenger.of(context).showSnackBar(
+                                         SnackBar(
+                                           content: Text('Error selecting resume: $e'),
+                                           backgroundColor: Colors.red,
+                                         ),
+                                       );
+                                     }
+                                   },
+                                   child: Container(
+                                     width: double.infinity,
+                                     height: 60,
+                                     decoration: BoxDecoration(
+                                       color: Colors.white.withOpacity(0.1),
+                                       borderRadius: BorderRadius.circular(8),
+                                       border: Border.all(color: Colors.white30, style: BorderStyle.solid),
+                                     ),
+                                     child: _selectedResumePath != null
+                                         ? Row(
+                                             mainAxisAlignment: MainAxisAlignment.center,
+                                             children: [
+                                               Icon(Icons.description, color: Colors.green, size: 24),
+                                               SizedBox(width: 8),
+                                               Expanded(
+                                                 child: Text(
+                                                   _selectedResumePath!.split('/').last,
+                                                   style: GoogleFonts.poppins(
+                                                     color: Colors.green,
+                                                     fontSize: 12,
+                                                     fontWeight: FontWeight.w600,
+                                                   ),
+                                                   maxLines: 1,
+                                                   overflow: TextOverflow.ellipsis,
+                                                 ),
+                                               ),
+                                             ],
+                                           )
+                                         : Column(
+                                             mainAxisAlignment: MainAxisAlignment.center,
+                                             children: [
+                                               Icon(Icons.upload_file, color: Colors.white70, size: 24),
+                                               SizedBox(height: 4),
+                                               Text(
+                                                 'Tap to upload resume (PDF/DOC)',
+                                                 style: GoogleFonts.poppins(
+                                                   color: Colors.white70,
+                                                   fontSize: 12,
+                                                 ),
+                                               ),
+                                             ],
+                                           ),
+                                   ),
+                                 ),
+                               ],
+                             ),
+                           ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    
+                    // Fee Display
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.yellow.withOpacity(0.5)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.payment, color: Colors.yellow, size: 24),
+                          SizedBox(width: 8),
+                          Text(
+                            'Application Fee: ₹1000',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.yellow,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    
+                    // Action Buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: Text(
+                              'Cancel',
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              // Validate form
+                              if (nameController.text.isEmpty ||
+                                  emailController.text.isEmpty ||
+                                  phoneController.text.isEmpty ||
+                                  experienceController.text.isEmpty ||
+                                  skillsController.text.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Please fill all fields'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                                return;
+                              }
+                              
+                              if (_selectedPhotoPath == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Please select a profile photo'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                                return;
+                              }
+                              
+                              if (_selectedResumePath == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Please select a resume'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                                return;
+                              }
+                              
+                              Navigator.of(context).pop();
+                              _initiatePayment(job);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: Text(
+                              'Pay & Apply',
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _initiatePayment(Job job) {
+    var options = {
+      'key': 'rzp_live_fgQr0ACWFbL4pN', // Replace with your Razorpay test key
+      'amount': 100000, // Amount in paise (₹1000 = 100000 paise)
+      'name': 'PlaySmart Services',
+      'description': 'Job Application Fee for ${job.jobTitle}',
+      'prefill': {
+        'contact': '',
+        'email': '',
+      },
+      'external': {
+        'wallets': ['paytm']
+      }
+    };
+
+    try {
+      _razorpay.open(options);
+    } catch (e) {
+      print('Error opening Razorpay: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error opening payment gateway'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _uploadFiles(Job job, String photoPath, String resumePath) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      
+      if (token == null) {
+        throw Exception('No authentication token found');
+      }
+
+      // Create multipart request for photo
+      var photoRequest = http.MultipartRequest(
+        'POST',
+        Uri.parse('https://playsmart.co.in/upload_photo.php'),
+      );
+      
+      photoRequest.headers['Authorization'] = 'Bearer $token';
+      photoRequest.files.add(
+        await http.MultipartFile.fromPath('photo', photoPath),
+      );
+      photoRequest.fields['job_id'] = job.id.toString();
+      
+      var photoResponse = await photoRequest.send();
+      var photoResult = await photoResponse.stream.bytesToString();
+      print('Photo upload result: $photoResult');
+
+      // Create multipart request for resume
+      var resumeRequest = http.MultipartRequest(
+        'POST',
+        Uri.parse('https://playsmart.co.in/upload_resume.php'),
+      );
+      
+      resumeRequest.headers['Authorization'] = 'Bearer $token';
+      resumeRequest.files.add(
+        await http.MultipartFile.fromPath('resume', resumePath),
+      );
+      resumeRequest.fields['job_id'] = job.id.toString();
+      
+      var resumeResponse = await resumeRequest.send();
+      var resumeResult = await resumeResponse.stream.bytesToString();
+      print('Resume upload result: $resumeResult');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Files uploaded successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error uploading files: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error uploading files: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _animationController.dispose();
     _floatingIconsController.dispose();
     _pulseController.dispose();
+    _jobApplicationsScrollController.dispose();
+    _autoScrollTimer?.cancel();
     _refreshTimer?.cancel();
+    _razorpay.clear();
     super.dispose();
   }
+
+
 
   Future<void> _redirectToLogin() async {
     print('Redirecting to login...');
@@ -175,6 +954,60 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
   }
 
+
+
+  Future<void> fetchJobApplications() async {
+    try {
+      print('DEBUG: Starting to fetch job applications...');
+      print('DEBUG: API URL: ${JobApplicationController.baseUrl}/fetch_job_applications.php');
+      
+      final applicationsData = await JobApplicationController.fetchJobApplications();
+      print('DEBUG: Received ${applicationsData.length} applications from API');
+      
+      if (mounted) {
+        setState(() {
+          jobApplications = applicationsData;
+        });
+        print('DEBUG: Updated state with ${jobApplications.length} applications');
+      }
+      print('DEBUG: Fetched ${jobApplications.length} job applications successfully');
+    } catch (e) {
+      print('Error fetching job applications: $e');
+      print('DEBUG: Full error details: $e');
+      if (mounted) {
+        setState(() {
+          // Keep the sample data if API fails
+          if (jobApplications.isEmpty) {
+            print('DEBUG: API failed, keeping sample data');
+          }
+        });
+      }
+      // Don't crash the app, just show empty state
+    }
+  }
+
+  Future<void> fetchJobs() async {
+    try {
+      print('DEBUG: Starting to fetch jobs...');
+      final jobsData = await JobController.fetchJobs();
+      print('DEBUG: Received ${jobsData.length} jobs from API');
+      if (mounted) {
+        setState(() {
+          jobs = jobsData;
+        });
+        print('DEBUG: Updated state with ${jobs.length} jobs');
+      }
+      print('DEBUG: Fetched ${jobs.length} jobs successfully');
+    } catch (e) {
+      print('Error fetching jobs: $e');
+      if (mounted) {
+        setState(() {
+          jobs = [];
+        });
+      }
+    }
+  }
+
   Future<void> fetchContests() async {
     try {
       await updateLastActivity();
@@ -192,11 +1025,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           final status = await _megaContestController.fetchMegaContestStatus(contest.id);
           print('DEBUG: Fetched status for Contest ID: ${contest.id}, Status: $status');
           final startDateTime = DateTime.tryParse(status['start_datetime'] ?? '') ?? contest.startDateTime ?? DateTime.now();
-          
-          // Use server status directly
+
           final hasSubmitted = status['has_submitted'] ?? false;
           final hasViewedResults = status['has_viewed_results'] ?? false;
-          
+
           final existingStatus = _megaContestStatus[contest.id];
           newMegaContestStatus[contest.id] = {
             'is_joinable': status['is_joinable'] ?? false,
@@ -221,7 +1053,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           }
         }
       }
-      
+
       setState(() {
         miniContests = miniContestsData;
         _megaContestStatus = newMegaContestStatus;
@@ -244,7 +1076,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           final status = _megaContestStatus[contest.id];
           if (status == null) {
             print('DEBUG: Contest ID: ${contest.id} has no status data. Using fallback logic.');
-            // Fallback: Show contests that are within 2 hours of start time
             final startDateTime = contest.startDateTime ?? DateTime.now();
             final now = DateTime.now();
             final minutesUntilStart = startDateTime.difference(now).inMinutes;
@@ -257,24 +1088,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           final hasSubmitted = status['has_submitted'] ?? false;
           final hasViewedResults = status['has_viewed_results'] ?? false;
           final isJoinable = status['is_joinable'] ?? false;
-          
-          // Get contest start time
+
           final startDateTime = DateTime.tryParse(status['start_datetime'] ?? '') ?? contest.startDateTime ?? DateTime.now();
           final now = DateTime.now();
           final minutesUntilStart = startDateTime.difference(now).inMinutes;
           final minutesSinceStart = now.difference(startDateTime).inMinutes;
-          
-          // Show contests that are:
-          // 1. Joinable (within join window)
-          // 2. User has joined (regardless of time)
-          // 3. User has participated (regardless of time)
-          // 4. Within 30 minutes before start time (so users can see upcoming contests)
-          // 5. Within 2 hours after start time (so users can see recent contests)
-          final shouldBeVisible = isJoinable || 
-                                 hasJoined || 
-                                 hasSubmitted || 
-                                 (minutesUntilStart >= -120 && minutesUntilStart <= 30);
-          
+
+          final shouldBeVisible = isJoinable ||
+              hasJoined ||
+              hasSubmitted ||
+              (minutesUntilStart >= -120 && minutesUntilStart <= 30);
+
           print('DEBUG: Filtering Contest ID: ${contest.id}, Name: ${contest.name}');
           print('   hasJoined: $hasJoined, hasSubmitted: $hasSubmitted, hasViewedResults: $hasViewedResults, isJoinable: $isJoinable');
           print('   startDateTime: $startDateTime, minutesUntilStart: $minutesUntilStart, minutesSinceStart: $minutesSinceStart');
@@ -298,16 +1122,64 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         timer.cancel();
         return;
       }
-      print('DEBUG: Refresh timer triggered. Fetching user balance and contests...');
+      print('DEBUG: Refresh timer triggered. Fetching user balance, contests, job applications and jobs...');
+      try {
       await fetchUserBalance();
       await fetchContests();
+        await fetchJobApplications();
+        await fetchJobs();
+      } catch (e) {
+        print('Error in refresh timer: $e');
+      }
     });
+  }
+
+  void _startAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = Timer.periodic(Duration(seconds: 3), (timer) {
+      if (!mounted || jobApplications.length <= 3) {
+        timer.cancel();
+        return;
+      }
+      
+      if (_jobApplicationsScrollController.hasClients) {
+        final maxScroll = _jobApplicationsScrollController.position.maxScrollExtent;
+        final currentScroll = _jobApplicationsScrollController.position.pixels;
+        
+        if (currentScroll >= maxScroll) {
+          // Reset to beginning when reaching the end
+          _jobApplicationsScrollController.animateTo(
+            0,
+            duration: Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
+          );
+        } else {
+          // Scroll to next item
+          _jobApplicationsScrollController.animateTo(
+            currentScroll + 215, // Width of card + margin
+            duration: Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
+          );
+        }
+      }
+    });
+  }
+
+  void _pauseAutoScroll() {
+    _autoScrollTimer?.cancel();
+  }
+
+  void _resumeAutoScroll() {
+    _startAutoScroll();
   }
 
   Future<String?> getMatchId(int contestId) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
-    if (token == null) return null;
+    if (token == null) {
+      print('ERROR: No token found for fetching match ID');
+      return null;
+    }
     try {
       await updateLastActivity();
       final response = await http.get(
@@ -338,12 +1210,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
   }
 
-  // Show rankings popup when joining mega contest
   Future<void> _showRankingsPopup(Contest contest) async {
     try {
       final rankings = await _megaContestController.fetchContestRankings(contest.id);
       _contestRankings[contest.id] = rankings;
-      
+
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -430,7 +1301,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       );
     } catch (e) {
       print('Error fetching rankings: $e');
-      // If rankings fetch fails, join directly
       joinContest(contest);
     }
   }
@@ -444,26 +1314,22 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
   Future<void> joinContest(Contest contest) async {
     if (userBalance < contest.entryFee) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Insufficient balance to join contest')),
-      );
+      print('ERROR: Insufficient balance to join contest ${contest.id}');
       return;
     }
-    
+
     try {
       await updateLastActivity();
       final joinData = contest.type == 'mega'
           ? await _megaContestController.joinMegaContest(contest.id, contest.entryFee)
           : await _miniContestController.joinContest(contest.id, contest.entryFee, contest.type);
-      
+
       final String? matchId = joinData['match_id']?.toString();
       if (matchId == null || matchId.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: Match ID not received from server')),
-        );
+        print('ERROR: Match ID not received from server for contest ${contest.id}');
         return;
       }
-      
+
       setState(() {
         userBalance -= contest.entryFee;
         if (contest.type == 'mega') {
@@ -482,7 +1348,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           };
         }
       });
-      
+
       if (contest.type == 'mega') {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Successfully joined Mega Contest. Wait for the start time.')),
@@ -507,9 +1373,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error joining contest: $e')),
-      );
+      print('Error joining contest ${contest.id}: $e');
     }
   }
 
@@ -517,19 +1381,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     await updateLastActivity();
     final matchId = await getMatchId(contest.id);
     if (matchId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: Match ID not found')),
-      );
+      print('ERROR: Match ID not found for contest ${contest.id}');
       return;
     }
-    
+
     try {
       final result = await _megaContestController.startMegaContest(contest.id, matchId);
       if (result['success']) {
         setState(() {
           _megaContestStatus[contest.id]!['is_active'] = true;
         });
-        
+
         final quizResult = await Navigator.push(
           context,
           MaterialPageRoute(
@@ -543,7 +1405,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             ),
           ),
         );
-        
+
         if (quizResult != null && quizResult is Map<String, dynamic> && quizResult['success'] == true) {
           setState(() {
             _megaContestStatus[contest.id]!['has_submitted'] = quizResult['hasSubmitted'] ?? true;
@@ -558,7 +1420,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             print('    has_submitted: ${_megaContestStatus[contest.id]!['has_submitted']}');
             print('    has_viewed_results: ${_megaContestStatus[contest.id]!['has_viewed_results']}');
           });
-          // Delay fetchContests to allow server to commit scorer
           Future.delayed(Duration(seconds: 2), () {
             if (mounted) {
               fetchContests();
@@ -571,14 +1432,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           fetchContests();
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error starting contest: ${result['message']}')),
-        );
+        print('Error starting contest ${contest.id}: ${result['message']}');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error starting contest: $e')),
-      );
+      print('Error starting contest ${contest.id}: $e');
     }
   }
 
@@ -587,49 +1444,39 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       await updateLastActivity();
       final matchId = await getMatchId(contest.id);
       if (matchId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: Match ID not found')),
-        );
+        print('ERROR: Match ID not found for contest ${contest.id}');
         return;
       }
-      
+
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token');
       if (token == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: No token found')),
-        );
+        print('ERROR: No token found for contest ${contest.id}');
         return;
       }
-      
+
       final response = await http.get(
         Uri.parse('https://playsmart.co.in/mega/fetch_results.php?session_token=$token&contest_id=${contest.id}&match_id=$matchId'),
       ).timeout(Duration(seconds: 10));
-      
+
       if (response.statusCode != 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error fetching results: HTTP ${response.statusCode}')),
-        );
+        print('ERROR: Failed to fetch results for contest ${contest.id}: HTTP ${response.statusCode}');
         return;
       }
-      
+
       final resultData = jsonDecode(response.body);
       if (!resultData['success']) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error fetching results: ${resultData['message']}')),
-        );
+        print('ERROR: Failed to fetch results for contest ${contest.id}: ${resultData['message']}');
         return;
       }
-      
-      // Parse numeric fields safely
+
       double? parseToDouble(dynamic value) {
         if (value == null) return null;
         if (value is num) return value.toDouble();
         if (value is String) return double.tryParse(value);
         return null;
       }
-      
-      // Navigate to MegaResultScreen and wait for result
+
       final resultViewed = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -647,8 +1494,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           ),
         ),
       );
-      
-      // Only set has_viewed_results if results were successfully viewed
+
       if (resultViewed == true) {
         setState(() {
           _megaContestStatus[contest.id]!['has_viewed_results'] = true;
@@ -658,21 +1504,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           _megaContestStatus[contest.id]!['opponentScore'] = parseToDouble(resultData['opponent_score']);
           print('DEBUG: Set has_viewed_results to true for contest ${contest.id}');
         });
-        
-        // Results viewed - no timer needed to remove contest
+
         print('DEBUG: Results viewed for contest ${contest.id}');
       }
-      
-      // Refresh contests to ensure consistent state
+
       Future.delayed(Duration(seconds: 1), () {
         if (mounted) {
           fetchContests();
         }
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ERROR: Failed to view results for contest ${contest.id}: $e')),
-      );
+      print('ERROR: Failed to view results for contest ${contest.id}: $e');
     }
   }
 
@@ -692,6 +1534,306 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       icons[index % icons.length],
       color: Colors.grey,
       size: sizes[index % sizes.length],
+    );
+  }
+
+  Widget _buildJobApplicationCard(JobApplication application) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+              child: Padding(
+          padding: EdgeInsets.all(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Company Name and Logo
+              Row(
+                children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: application.companyLogoUrl.isNotEmpty
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: Image.network(
+                              application.companyLogoUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Icon(
+                                  Icons.business,
+                                  color: Colors.grey[600],
+                                  size: 16,
+                                );
+                              },
+                            ),
+                          )
+                        : Icon(
+                            Icons.business,
+                            color: Colors.grey[600],
+                            size: 16,
+                          ),
+                  ),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      application.companyName,
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            SizedBox(height: 4),
+            // Student Name
+            Text(
+              application.studentName,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 2),
+            // District
+            Text(
+              application.district,
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                color: Colors.grey[600],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 4),
+            // Package
+            Row(
+              children: [
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 11),
+                SizedBox(width: 2),
+                Text(
+                  application.package,
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 4),
+            // Profile
+            Text(
+              '💼 ${application.profile}',
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                color: Colors.grey[600],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 3),
+            // Application Status
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: _getStatusColor(application.applicationStatus).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _getStatusColor(application.applicationStatus).withOpacity(0.3),
+                ),
+              ),
+              child: Text(
+                _getStatusText(application.applicationStatus),
+                style: GoogleFonts.poppins(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w600,
+                  color: _getStatusColor(application.applicationStatus),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
+  Widget _buildJobCard(Job job) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                // Company Logo
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: job.companyLogoUrl.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            job.companyLogoUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Icon(
+                                Icons.business,
+                                color: Colors.grey[600],
+                                size: 24,
+                              );
+                            },
+                          ),
+                        )
+                      : Icon(
+                          Icons.business,
+                          color: Colors.grey[600],
+                          size: 24,
+                        ),
+                ),
+                SizedBox(width: 12),
+                // Company Name
+                Expanded(
+                  child: Text(
+                    job.companyName,
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            // Job Title
+            Text(
+              job.jobTitle,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 8),
+            // Package
+            Row(
+              children: [
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 16),
+                SizedBox(width: 4),
+                Text(
+                  job.package,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 4),
+            // Location
+            Row(
+              children: [
+                Icon(Icons.location_on, color: Colors.grey[600], size: 16),
+                SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    job.location,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            // Apply Button or Status
+            if (userJobApplications.containsKey(job.id))
+              GestureDetector(
+                onTap: () => _showJobStatusModal(job),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    'Status',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue[700],
+                    ),
+                  ),
+                ),
+              )
+            else
+              GestureDetector(
+                onTap: () => _showJobApplicationModal(job),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    'Apply',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.green[700],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -724,6 +1866,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final sortedMiniContests = miniContests.toList()
+      ..sort((a, b) => b.entryFee.compareTo(a.entryFee));
+
     return Scaffold(
       body: Stack(
         children: [
@@ -764,6 +1909,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Header content
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -800,135 +1946,189 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                           },
                         ),
                       ),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(20),
+                      FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: Text(
+                          'Play Smart Services',
+                          style: GoogleFonts.poppins(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withOpacity(0.3),
+                                offset: Offset(0, 2),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.account_balance_wallet, color: Colors.amber, size: 20),
-                            SizedBox(width: 5),
-                            Text(
-                              '₹${userBalance.toStringAsFixed(2)}',
+                      ),
+                      SizedBox(width: 60), // Balance the layout
+                    ],
+                  ),
+                  
+                  // Scrollable main content
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: BouncingScrollPhysics(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Job Applications Section (First Container)
+                          Text(
+                            'Job Applications',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Container(
+                            height: 150,
+                            child: jobApplications.isNotEmpty 
+                              ? GestureDetector(
+                                  onPanStart: (_) => _pauseAutoScroll(),
+                                  onPanEnd: (_) => Future.delayed(Duration(seconds: 2), _resumeAutoScroll),
+                                  child: ListView.builder(
+                                    controller: _jobApplicationsScrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    physics: BouncingScrollPhysics(),
+                                    itemCount: jobApplications.length > 3 ? 3 : jobApplications.length,
+                                    itemBuilder: (context, index) {
+                                      final application = jobApplications[index];
+                                      return Container(
+                                        width: 200,
+                                        margin: EdgeInsets.only(right: 15),
+                                        child: _buildJobApplicationCard(application),
+                                      );
+                                    },
+                                  ),
+                                )
+                              : Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.work_outline,
+                                        color: Colors.white70,
+                                        size: 28,
+                                      ),
+                                      SizedBox(height: 6),
+                                      Text(
+                                        'No applications available',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.white70,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      SizedBox(height: 4),
+                                      Text(
+                                        'Debug: ${jobApplications.length} apps loaded',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.white60,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                          ),
+                        
+                          SizedBox(height: 8),
+                          // Popular Jobs Section
+                          Container(
+                            padding: EdgeInsets.symmetric(vertical: 8),
+                            child: Text(
+                              'Popular Jobs',
                               style: GoogleFonts.poppins(
                                 color: Colors.white,
-                                fontSize: 16,
+                                fontSize: 24,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            SizedBox(width: 10),
-                            IconButton(
-                              icon: Icon(Icons.refresh, color: Colors.white, size: 20),
-                              onPressed: fetchUserBalance,
-                            ),
-                          ],
-                        ),
-                      ),
-                      FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: _buildAnimatedIconButton(
-                          icon: Icons.logout,
-                          onPressed: () async {
-                            final prefs = await SharedPreferences.getInstance();
-                            await prefs.clear();
-                            Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginScreen()));
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-                  FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: SlideTransition(
-                      position: _slideAnimation,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          AnimatedBuilder(
-                            animation: _pulseController,
-                            builder: (context, child) {
-                              return Transform.scale(
-                                scale: 1.0 + (_pulseController.value * 0.05),
-                                child: ShaderMask(
-                                  shaderCallback: (bounds) => LinearGradient(
-                                    colors: [Colors.amber, Colors.yellow],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ).createShader(bounds),
-                                  child: Text(
-                                    'Play Smart Services',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 32,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                      shadows: [
-                                        Shadow(
-                                          color: Colors.black.withOpacity(0.3),
-                                          offset: Offset(0, 3),
-                                          blurRadius: 6,
+                          ),
+                          SizedBox(height: 8),
+                          Container(
+                            height: 190,
+                            child: jobs.isNotEmpty 
+                              ? ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: BouncingScrollPhysics(),
+                                  itemCount: jobs.length,
+                                  itemBuilder: (context, index) {
+                                    final job = jobs[index];
+                                    return Container(
+                                      width: 200,
+                                      margin: EdgeInsets.only(right: 15),
+                                      child: _buildJobCard(job),
+                                    );
+                                  },
+                                )
+                              : Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.business_center_outlined,
+                                        color: Colors.white70,
+                                        size: 28,
+                                      ),
+                                      SizedBox(height: 6),
+                                      Text(
+                                        'No jobs available',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.white70,
+                                          fontSize: 14,
                                         ),
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              );
-                            },
                           ),
-                          Text(
-                            'Test your knowledge & win big!',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white.withOpacity(0.8),
-                              fontSize: 16,
+                          SizedBox(height: 12),
+                          // Contests Section
+                          if (megaContests.isNotEmpty) ...[
+                            Text(
+                              'Mega Contests',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
+                            SizedBox(height: 10),
+                            ...megaContests.asMap().entries.map((entry) {
+                              final index = entry.key;
+                              final contest = entry.value;
+                              return _buildContestCard(contest, index, isMega: true);
+                            }),
+                          ],
+                          if (sortedMiniContests.isNotEmpty) ...[
+                            SizedBox(height: 20),
+                            Text(
+                              'Mini Contests',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 10),
+                            ...sortedMiniContests.asMap().entries.map((entry) {
+                              final index = entry.key;
+                              final contest = entry.value;
+                              return _buildContestCard(contest, index, isMega: false);
+                            }),
+                          ],
+                          if (megaContests.isEmpty && sortedMiniContests.isEmpty)
+                            Center(child: CircularProgressIndicator(color: Colors.white)),
+                          
+                          // Bottom spacing for scrollable content
+                          SizedBox(height: 30),
                         ],
                       ),
-                    ),
-                  ),
-                  SizedBox(height: 30),
-                  Expanded(
-                    child: ListView(
-                      physics: BouncingScrollPhysics(),
-                      children: [
-                        if (miniContests.isNotEmpty) ...[
-                          Text(
-                            'Mini Contests',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(height: 10),
-                          ...miniContests.asMap().entries.map((entry) {
-                            final index = entry.key;
-                            final contest = entry.value;
-                            return _buildContestCard(contest, index, isMega: false);
-                          }),
-                        ],
-                        if (megaContests.isNotEmpty) ...[
-                          SizedBox(height: 20),
-                          Text(
-                            'Mega Contests',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(height: 10),
-                          ...megaContests.asMap().entries.map((entry) {
-                            final index = entry.key;
-                            final contest = entry.value;
-                            return _buildContestCard(contest, index, isMega: true);
-                          }),
-                        ],
-                        if (miniContests.isEmpty && megaContests.isEmpty)
-                          Center(child: CircularProgressIndicator(color: Colors.white)),
-                      ],
                     ),
                   ),
                 ],
@@ -950,18 +2150,14 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     final startDateTime = DateTime.tryParse(status['start_datetime'] ?? '') ?? contest.startDateTime ?? DateTime.now();
     final isStartTimeReached = DateTime.now().difference(startDateTime).inSeconds >= 0;
     final minutesUntilStart = startDateTime.difference(DateTime.now()).inMinutes;
-    
-    // isStartWindowOpen means the contest has started and user has joined but not submitted
+
     final bool isStartWindowOpen = isActive && !hasSubmitted;
-    // canJoinMega: Mega contest is joinable, user hasn't joined, and there's still time to join (more than 1 minute until start)
     final bool canJoinMega = isMega && isJoinable && !hasJoined && minutesUntilStart > 1;
-    // canStartMega: Mega contest has been joined, start time has been reached, and user hasn't submitted
     final bool canStartMega = isMega && hasJoined && isStartTimeReached && !hasSubmitted;
-    // canViewResultsMega: Mega contest has been submitted, but results haven't been viewed
     final bool canViewResultsMega = isMega && hasSubmitted && !hasViewedResults;
-    
+
     final gradient = cardGradients[index % cardGradients.length];
-    
+
     print('DEBUG: Building Card for Contest ID: ${contest.id}, Name: ${contest.name}');
     print('    isJoinable: $isJoinable, hasJoined: $hasJoined, isActive: $isActive, hasSubmitted: $hasSubmitted, hasViewedResults: $hasViewedResults');
     print('    startDateTime: $startDateTime, isStartTimeReached: $isStartTimeReached, minutesUntilStart: $minutesUntilStart');
@@ -973,11 +2169,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     bool buttonEnabled;
 
     if (isMega) {
-      // Check if we have status data, if not use fallback logic
       final hasStatusData = _megaContestStatus.containsKey(contest.id);
-      
+
       if (!hasStatusData) {
-        // Fallback logic when status is not available
         if (minutesUntilStart > 1 && minutesUntilStart <= 30) {
           buttonText = 'Join Now';
           buttonColor = Colors.green;
@@ -1005,17 +2199,14 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         buttonEnabled = true;
       } else if (hasJoined && !hasSubmitted) {
         if (minutesUntilStart > 0) {
-          // User has joined but contest hasn't started yet
           buttonText = 'Waiting to Start (${minutesUntilStart}m)';
           buttonColor = Colors.orange;
           buttonEnabled = false;
         } else if (isStartTimeReached) {
-          // User has joined and start time has been reached - show Start Now
           buttonText = 'Start Now';
           buttonColor = Colors.green;
           buttonEnabled = true;
         } else {
-          // User has joined and contest should be active
           buttonText = 'Waiting to Start';
           buttonColor = Colors.orange;
           buttonEnabled = false;
@@ -1029,12 +2220,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         buttonColor = Colors.blue;
         buttonEnabled = true;
       } else if (isMega && !hasJoined && minutesUntilStart <= 1 && minutesUntilStart > -120) {
-        // Contest is within 2 hours of start time but not joinable (within 1 minute of start)
         buttonText = 'Joining Closed';
         buttonColor = Colors.grey.withOpacity(0.5);
         buttonEnabled = false;
       } else if (isMega && !hasJoined && minutesUntilStart > 1 && minutesUntilStart <= 30) {
-        // Contest is within 30 minutes before start but not joinable (server says not joinable)
         buttonText = 'Joining Soon (${minutesUntilStart}m)';
         buttonColor = Colors.grey.withOpacity(0.5);
         buttonEnabled = false;
@@ -1058,9 +2247,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               ? () {
                   if (isMega) {
                     final hasStatusData = _megaContestStatus.containsKey(contest.id);
-                    
+
                     if (!hasStatusData) {
-                      // Fallback logic when status is not available
                       if (minutesUntilStart > 1 && minutesUntilStart <= 30) {
                         _showRankingsPopup(contest);
                       } else if (minutesUntilStart <= 0 && minutesUntilStart > -120) {
@@ -1206,7 +2394,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                             fontSize: 14,
                           ),
                         ),
-                        // Display Total Winning Amount instead of Rankings
                         if (contest.totalWinningAmount != null)
                           Text(
                             'Total Winning Amount: ₹${contest.totalWinningAmount!.toStringAsFixed(2)}',
@@ -1283,4 +2470,265 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       ),
     );
   }
-} 
+
+  void _showJobStatusModal(Job job) {
+    final status = userJobApplications[job.id] ?? 'pending';
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Job Header
+                  Row(
+                    children: [
+                      Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: job.companyLogoUrl.isNotEmpty
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(
+                                  job.companyLogoUrl,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Icon(
+                                      Icons.business,
+                                      color: Colors.white70,
+                                      size: 30,
+                                    );
+                                  },
+                                ),
+                              )
+                            : Icon(
+                                Icons.business,
+                                color: Colors.white70,
+                                size: 30,
+                              ),
+                      ),
+                      SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              job.jobTitle,
+                              style: GoogleFonts.poppins(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              job.companyName,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                color: Colors.white70,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 24),
+                  
+                  // Status Progress Bar
+                  Text(
+                    'Application Status',
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 20),
+                  
+                  // Progress Steps
+                  _buildProgressStep('Application Submitted', true, 0),
+                  _buildProgressStep('Screening In Progress', status == 'pending' || status == 'shortlisted' || status == 'accepted', 1),
+                  _buildProgressStep('Interview Scheduled', status == 'shortlisted' || status == 'accepted', 2),
+                  _buildProgressStep('Offer Letter Pending', status == 'accepted', 3),
+                  _buildProgressStep('Hired', status == 'accepted', 4),
+                  
+                  SizedBox(height: 24),
+                  
+                  // Current Status
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _getStatusIcon(status),
+                          color: _getStatusColor(status),
+                          size: 24,
+                        ),
+                        SizedBox(width: 12),
+                        Text(
+                          'Current Status: ${_getStatusText(status)}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  SizedBox(height: 24),
+                  
+                  // Close Button
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Color(0xFF6A11CB),
+                      padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      'Close',
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProgressStep(String title, bool isActive, int step) {
+    final isCompleted = step <= _getCurrentStep(userJobApplications[_currentJobApplication?.id] ?? 'pending');
+    
+    return Container(
+      margin: EdgeInsets.only(bottom: 16),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: isCompleted ? Colors.green : Colors.white.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: isCompleted 
+                ? Icon(Icons.check, color: Colors.white, size: 16)
+                : null,
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              title,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: isCompleted ? Colors.white : Colors.white70,
+                fontWeight: isCompleted ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  int _getCurrentStep(String status) {
+    switch (status) {
+      case 'pending':
+        return 1;
+      case 'shortlisted':
+        return 2;
+      case 'accepted':
+        return 4;
+      default:
+        return 0;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status) {
+      case 'pending':
+        return Icons.hourglass_empty;
+      case 'shortlisted':
+        return Icons.thumb_up;
+      case 'accepted':
+        return Icons.check_circle;
+      default:
+        return Icons.info;
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'pending':
+        return Colors.orange;
+      case 'shortlisted':
+        return Colors.blue;
+      case 'accepted':
+        return Colors.green;
+      default:
+        return Colors.white;
+    }
+  }
+
+  String _getStatusText(String status) {
+    switch (status) {
+      case 'pending':
+        return 'Under Review';
+      case 'shortlisted':
+        return 'Shortlisted';
+      case 'accepted':
+        return 'Accepted';
+      default:
+        return 'Pending';
+    }
+  }
+
+
+}

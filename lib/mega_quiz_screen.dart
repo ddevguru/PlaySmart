@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:lottie/lottie.dart';
 import 'package:playsmart/Models/question.dart';
 import 'package:playsmart/Auth/login_screen.dart';
 import 'package:playsmart/controller/mega-contest-controller.dart';
@@ -226,29 +225,25 @@ class _MegaQuizScreenState extends State<MegaQuizScreen> with TickerProviderStat
 
   void _nextQuestion() {
     if (currentQuestionIndex < questions.length - 1) {
-      setState(() {
-        currentQuestionIndex++;
-        questionTimeRemaining = 30;
+      _questionTransitionController.reverse().then((_) {
+        setState(() {
+          currentQuestionIndex++;
+          questionTimeRemaining = 30;
+        });
+        _startQuestionTimer();
+        _questionTransitionController.forward();
       });
-      _startQuestionTimer();
     } else {
       _endTest();
     }
   }
 
   void _selectAnswer(String option) {
-    if (hasSubmitted || isSubmitting || userAnswers[currentQuestionIndex] != null) return;
+    if (hasSubmitted || isSubmitting) return;
     
     HapticFeedback.lightImpact();
     setState(() {
       userAnswers[currentQuestionIndex] = option;
-    });
-    
-    // Auto-advance to next question after a short delay
-    Future.delayed(Duration(milliseconds: 800), () {
-      if (mounted && !hasSubmitted && !isSubmitting) {
-        _nextQuestion();
-      }
     });
   }
 
@@ -460,7 +455,6 @@ class _MegaQuizScreenState extends State<MegaQuizScreen> with TickerProviderStat
       );
     }
 
-    // Show submission screen
     if (isSubmitting) {
       return Scaffold(
         body: Container(
@@ -513,213 +507,259 @@ class _MegaQuizScreenState extends State<MegaQuizScreen> with TickerProviderStat
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
+            child: SlideTransition(
+              position: _slideAnimation,
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
-                      onPressed: hasSubmitted ? null : () {
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: Text('Exit Quiz?'),
-                            content: Text('Are you sure you want to exit? Your progress will be lost.'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: Text('Cancel'),
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                },
-                                child: Text('Exit'),
-                              ),
-                            ],
+                    // Header
+                    Row(
+                      children: [
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: IconButton(
+                            icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+                            onPressed: hasSubmitted ? null : () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: Text('Exit Quiz?', style: GoogleFonts.poppins()),
+                                  content: Text('Are you sure you want to exit? Your progress will be lost.', style: GoogleFonts.poppins()),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: Text('Cancel', style: GoogleFonts.poppins()),
+                                    ),
+                                    TextButton(
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        Navigator.pop(context);
+                                      },
+                                      child: Text('Exit', style: GoogleFonts.poppins(color: Colors.red)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
+                        ),
+                        Expanded(
+                          child: FadeTransition(
+                            opacity: _fadeAnimation,
+                            child: Center(
+                              child: AnimatedBuilder(
+                                animation: _pulseController,
+                                builder: (context, child) {
+                                  return Transform.scale(
+                                    scale: 1.0 + (_pulseController.value * 0.03),
+                                    child: Text(
+                                      widget.contestName,
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white,
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (isTimerRunning)
+                          FadeTransition(
+                            opacity: _fadeAnimation,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              child: Text(
+                                _formatTime(remainingTimeInSeconds),
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                    Expanded(
-                      child: Center(
+                    const SizedBox(height: 20),
+                    // Question info
+                    Text(
+                      'Question ${currentQuestionIndex + 1}/${questions.length}',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Time left: $questionTimeRemaining s',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (isWaitingForAutoSubmit) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                        ),
                         child: Text(
-                          widget.contestName,
+                          'Waiting for others...',
                           style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
+                            color: Colors.orange[200],
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
-                    ),
-                    if (isTimerRunning)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(15),
+                    ],
+                    const SizedBox(height: 20),
+                    // Question container
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: Colors.white.withOpacity(0.2)),
+                      ),
+                      child: Text(
+                        currentQuestion.questionText,
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
                         ),
-                        child: Text(
-                          _formatTime(remainingTimeInSeconds),
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 25),
+                    // Options
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: ['A', 'B', 'C', 'D'].map((option) {
+                            final isSelected = userAnswers[currentQuestionIndex] == option;
+                            final displayOption = option == 'A'
+                                ? currentQuestion.optionA
+                                : option == 'B'
+                                    ? currentQuestion.optionB
+                                    : option == 'C'
+                                        ? currentQuestion.optionC
+                                        : currentQuestion.optionD;
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Container(
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  color: isSelected ? Colors.yellow[700] : Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 4,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  leading: CircleAvatar(
+                                    backgroundColor: isSelected ? Colors.yellow[900] : Colors.grey[300],
+                                    child: Text(
+                                      option,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        color: isSelected ? Colors.black : Colors.black87,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  title: Text(
+                                    displayOption,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      color: Colors.black,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                  onTap: isSubmitting
+                                      ? null
+                                      : () => _selectAnswer(option),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    // Next or Submit button
+                    if (currentQuestionIndex < questions.length - 1)
+                      Align(
+                        alignment: Alignment.bottomRight,
+                        child: ElevatedButton(
+                          onPressed: isSubmitting || userAnswers[currentQuestionIndex] == null
+                              ? null
+                              : () => _nextQuestion(),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            'Next',
+                            style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (currentQuestionIndex == questions.length - 1)
+                      Align(
+                        alignment: Alignment.bottomRight,
+                        child: ElevatedButton(
+                          onPressed: isSubmitting || userAnswers[currentQuestionIndex] == null
+                              ? null
+                              : () => _endTest(),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            'Submit',
+                            style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black,
+                            ),
                           ),
                         ),
                       ),
                   ],
                 ),
-                const SizedBox(height: 20),
-                
-                // Question info
-                Text(
-                  'Question ${currentQuestionIndex + 1}/${questions.length}',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Time left: $questionTimeRemaining s',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                if (isWaitingForAutoSubmit) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.orange.withOpacity(0.5)),
-                    ),
-                    child: Text(
-                      'Waiting for others...',
-                      style: GoogleFonts.poppins(
-                        color: Colors.orange[200],
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                
-                // Question container
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: Colors.white.withOpacity(0.2)),
-                  ),
-                  child: Text(
-                    currentQuestion.questionText,
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 25),
-                
-                // Options
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: ['A', 'B', 'C', 'D'].map((option) {
-                        final isSelected = userAnswers[currentQuestionIndex] == option;
-                        final displayOption = option == 'A'
-                            ? currentQuestion.optionA
-                            : option == 'B'
-                                ? currentQuestion.optionB
-                                : option == 'C'
-                                    ? currentQuestion.optionC
-                                    : currentQuestion.optionD;
-                        
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Container(
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: isSelected ? Colors.yellow[700] : Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.1),
-                                  blurRadius: 4,
-                                  offset: Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              leading: CircleAvatar(
-                                backgroundColor: isSelected ? Colors.yellow[900] : Colors.grey[300],
-                                child: Text(
-                                  option,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 16,
-                                    color: isSelected ? Colors.black : Colors.black87,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              title: Text(
-                                displayOption,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  color: Colors.black,
-                                  height: 1.3,
-                                ),
-                              ),
-                              onTap: () => _selectAnswer(option),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                
-                // Submit button (only show on last question)
-                if (currentQuestionIndex == questions.length - 1 && userAnswers[currentQuestionIndex] != null)
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: ElevatedButton(
-                      onPressed: isSubmitting ? null : () => _endTest(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: Text(
-                        'Submit',
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
         ),
