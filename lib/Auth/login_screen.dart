@@ -6,7 +6,7 @@ import 'package:playsmart/main_screen.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
-import 'package:lottie/lottie.dart';
+// import 'package:lottie/lottie.dart'; // Removed Lottie dependency
 import 'signup_screen.dart';
 // import 'main_screen.dart';
 // import 'reset_password_screen.dart';
@@ -341,16 +341,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           elevation: 0,
           child: Container(
             height: 200,
-            child: Lottie.network(
-              'https://assets9.lottiefiles.com/packages/lf20_jbrw3hcz.json',
-              repeat: false,
-              onLoaded: (composition) {
-                Future.delayed(Duration(milliseconds: 1500), () {
-                  if (mounted && dialogContext.mounted) {
-                    Navigator.of(dialogContext).pop();
-                  }
-                });
-              },
+            child: Image.asset(
+              'assets/icon/logo.jpg',
+              fit: BoxFit.contain,
             ),
           ),
         );
@@ -543,8 +536,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                   child: Container(
                                     height: 120,
                                     width: 120,
-                                    child: Lottie.network(
-                                      'https://assets3.lottiefiles.com/packages/lf20_touohxv0.json',
+                                    child: Image.asset(
+                                      'assets/icon/b1.jpg',
                                       fit: BoxFit.contain,
                                     ),
                                   ),

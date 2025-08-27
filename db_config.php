@@ -2,10 +2,11 @@
 // Database configuration for PlaySmart app
 // Update these values according to your server setup
 
+// Database credentials for your hosting server
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'playsmart_db');
-define('DB_USERNAME', 'root'); // Update with your actual database username
-define('DB_PASSWORD', ''); // Update with your actual database password
+define('DB_NAME', 'u968643667_playsmart'); // Your actual database name from logs
+define('DB_USERNAME', 'u968643667_playsmart'); // Your actual database username from logs
+define('DB_PASSWORD', 'your_actual_password'); // Replace with your actual database password
 define('DB_CHARSET', 'utf8mb4');
 
 // Base URL for the application
@@ -98,5 +99,31 @@ function checkDatabaseConnection() {
     } catch (Exception $e) {
         return ['success' => false, 'message' => $e->getMessage()];
     }
+}
+
+// Test database connection (JSON output only)
+if (isset($_GET['test_connection'])) {
+    header('Content-Type: application/json');
+    try {
+        $pdo = getDBConnection();
+        echo json_encode([
+            'success' => true,
+            'message' => 'Database connection successful',
+            'data' => [
+                'host' => DB_HOST,
+                'database' => DB_NAME,
+                'username' => DB_USERNAME,
+                'charset' => DB_CHARSET,
+                'php_version' => PHP_VERSION,
+                'pdo_drivers' => PDO::getAvailableDrivers()
+            ]
+        ]);
+    } catch (Exception $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Database connection failed: ' . $e->getMessage()
+        ]);
+    }
+    exit;
 }
 ?> 

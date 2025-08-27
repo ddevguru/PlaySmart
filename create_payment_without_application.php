@@ -109,7 +109,7 @@ try {
     }
     
     // Validate payment amount based on job type
-    $expectedAmount = ($job_type === 'higher_package') ? 2000 : 1000;
+    $expectedAmount = ($job_type === 'higher_package') ? 0.2 : 0.1;
     if ($payment_amount != $expectedAmount) {
         throw new Exception("Invalid payment amount. Expected ₹$expectedAmount for $job_type jobs");
     }
@@ -247,9 +247,9 @@ function getInstructionsForJobType($jobType) {
             "3. We provide Job for candidates on local Place or elsewhere",
             "4. We provide job opportunities for candidates according to their education.",
             "5. We provide 2 to 3 Interview calls within Month for candidates.",
-            "6. We provide you job opportunities That means we provide you a Service The registration fee for them is 2000.",
-            "7. Rs. 2000 Registration charges Will be limited for one year.",
-            "8. The fee of Rs. 2000 is non-refundable.",
+                    "6. We provide you job opportunities That means we provide you a Service The registration fee for them is 0.2.",
+        "7. Rs. 0.2 Registration charges Will be limited for one year.",
+        "8. The fee of Rs. 0.2 is non-refundable.",
             "9. If all the above are acceptable then register today. The company will contact you today for a job according to your education and provide you with further information."
         ];
     } else {
@@ -259,9 +259,9 @@ function getInstructionsForJobType($jobType) {
             "3. We provide Job for candidates on local Place or elsewhere",
             "4. We provide job opportunities for candidates according to their education.",
             "5. We provide 2 to 3 Interview calls within Month for candidates.",
-            "6. We provide you job opportunities That means you provide you a Service The registration fee for them is 1000.",
-            "7. Rs. 1000 Registration charges Will be limited for one year.",
-            "8. The fee of Rs. 1000 is non-refundable.",
+                    "6. We provide you job opportunities That means you provide you a Service The registration fee for them is 0.1.",
+        "7. Rs. 0.1 Registration charges Will be limited for one year.",
+        "8. The fee of Rs. 0.1 is non-refundable.",
             "9. If all the above are acceptable then register today. The company will contact you today for a job according to your education and provide you with further information."
         ];
     }

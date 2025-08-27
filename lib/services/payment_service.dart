@@ -29,6 +29,12 @@ class PaymentService {
     required String jobType, // 'local' or 'higher_package'
   }) async {
     try {
+      // Calculate expected amount based on job type
+      double expectedAmount = (jobType == 'higher_package') ? 5.0 : 5.0; // Both types now ₹5.00
+      if (amount != expectedAmount) {
+        throw Exception('Invalid amount. Expected ₹$expectedAmount for $jobType jobs');
+      }
+      
       final response = await http.post(
         Uri.parse('$_baseUrl/payment_integration.php'),
         headers: {'Content-Type': 'application/json'},
@@ -66,6 +72,13 @@ class PaymentService {
     required Function(String) onError,
   }) async {
     try {
+      // Calculate expected amount based on job type
+      double expectedAmount = (jobType == 'higher_package') ? 5.0 : 5.0; // Both types now ₹5.00
+      if (amount != expectedAmount) {
+        onError('Invalid amount. Expected ₹$expectedAmount for $jobType jobs');
+        return;
+      }
+      
       // Create payment integration first
       final paymentData = await createPaymentIntegration(
         applicationId: applicationId,

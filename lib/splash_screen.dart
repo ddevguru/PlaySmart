@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 import 'package:animated_text_kit/animated_text_kit.dart';
-import 'package:lottie/lottie.dart';
+// import 'package:lottie/lottie.dart'; // Removed Lottie dependency
 import 'package:playsmart/Auth/login_screen.dart';
 import 'package:playsmart/Auth/signup_screen.dart';
 
@@ -64,6 +64,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     
     return Scaffold(
       body: Container(
+          
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
@@ -74,11 +75,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             end: Alignment.bottomRight,
           ),
         ),
+      
         child: Stack(
+          
           children: [
             // Decorative elements
             Positioned(
-              top: screenHeight * 0.1,
+              top: screenHeight * 0.2,
               left: -screenWidth * 0.1,
               child: Container(
                 height: 150,
@@ -90,7 +93,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               ),
             ),
             Positioned(
-              bottom: screenHeight * 0.15,
+              bottom: screenHeight * 0.25,
               right: -screenWidth * 0.15,
               child: Container(
                 height: 200,
@@ -101,86 +104,33 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 ),
               ),
             ),
-            
-            // Animated quiz elements
-            Positioned(
-              top: screenHeight * 0.05,
-              left: 0,
-              right: 0,
-              child: FadeTransition(
-                opacity: _fadeInAnimation,
-                child: Container(
-                  height: screenHeight * 0.2,
-                  child: Lottie.network(
-                    'https://assets5.lottiefiles.com/packages/lf20_ysas4vcp.json',
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
-            ),
+            SizedBox(height: 40),
+            // Animated quiz elements - removed duplicate image
+            // Positioned(
+            //   top: screenHeight * 0.35,
+            //   left: 0,
+            //   right: 0,
+            //   child: FadeTransition(
+            //     opacity: _fadeInAnimation,
+            //     child: Container(
+            //       height: screenHeight * 0.2,
+            //       child: Image.asset(
+            //         'assets/icon/b1.jpg',
+            //         fit: BoxFit.contain,
+            //       ),
+            //     ),
+            //   ),
+            // ),
             
             // Main content
             Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Logo and title
-                  ScaleTransition(
-                    scale: _scaleAnimation,
-                    child: FadeTransition(
-                      opacity: _fadeInAnimation,
-                      child: Container(
-                        padding: EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 20,
-                              spreadRadius: 5,
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.emoji_events,
-                          size: 80,
-                          color: Colors.amber,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 20),
+                  // Add top margin for better spacing
+                  SizedBox(height: screenHeight * 0.05),
                   
-                  // App name with animated text
-                  FadeTransition(
-                    opacity: _fadeInAnimation,
-                    child: AnimatedTextKit(
-                      animatedTexts: [
-                        FlickerAnimatedText(
-                          'PLAY SMART',
-                          textStyle: GoogleFonts.poppins(
-                            color: Colors.amber,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 2,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withOpacity(0.3),
-                                offset: Offset(0, 3),
-                                blurRadius: 5,
-                              ),
-                            ],
-                          ),
-                          speed: Duration(milliseconds: 2000),
-                        ),
-                      ],
-                      isRepeatingAnimation: false,
-                    ),
-                  ),
-                  SizedBox(height: 15),
-                  
-                  // Tagline
+                  // App name - above the image
                   FadeTransition(
                     opacity: _fadeInAnimation,
                     child: ShaderMask(
@@ -195,13 +145,52 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                         'Play Smart Services',
                         style: GoogleFonts.poppins(
                           color: Colors.white,
-                          fontSize: 18,
+                          fontSize: 28,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                     ),
                   ),
-                  SizedBox(height: screenHeight * 0.08),
+                  SizedBox(height: 15),
+                  
+                  // Tagline - above the image
+                  FadeTransition(
+                    opacity: _fadeInAnimation,
+                    child: ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        return LinearGradient(
+                          colors: [Colors.white, Colors.white70],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        '100% Job Placement',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 30),
+                  
+                  // Logo and title
+                  ScaleTransition(
+                    scale: _scaleAnimation,
+                    child: FadeTransition(
+                      opacity: _fadeInAnimation,
+                      child: Container(
+                        height: screenHeight * 0.3,
+                        child: Image.asset(
+                          'assets/icon/b1.jpg',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 20),
                   
                   // Login button
                   FadeTransition(
@@ -285,21 +274,21 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             ),
             
             // Animated particles at the bottom
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: FadeTransition(
-                opacity: _fadeInAnimation,
-                child: Container(
-                  height: screenHeight * 0.15,
-                  child: Lottie.network(
-                    'https://assets1.lottiefiles.com/packages/lf20_obhph3sh.json',
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            ),
+            // Positioned(
+            //   bottom: 0,
+            //   left: 0,
+            //   right: 0,
+            //   child: FadeTransition(
+            //     opacity: _fadeInAnimation,
+            //     child: Container(
+            //       height: screenHeight * 0.15,
+            //       child: Image.asset(
+            //         'assets/icon/b1.jpg',
+            //         fit: BoxFit.cover,
+            //       ),
+            //     ),
+            //   ),
+            // ),
           ],
         ),
       ),

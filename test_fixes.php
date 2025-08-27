@@ -59,7 +59,7 @@ echo "<hr>";
 echo "<h2>3. Testing Payment Gateway</h2>";
 try {
     $testData = [
-        'payment_amount' => 1000,
+        'payment_amount' => 0.1,
         'job_type' => 'local',
         'student_name' => 'Test User',
         'email' => 'test@example.com',

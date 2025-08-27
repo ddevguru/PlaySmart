@@ -79,7 +79,7 @@ try {
     
     // Determine registration fee based on package
     $package_value = (float) preg_replace('/[^\d.]/', '', $job['package']);
-    $registration_fee = ($package_value >= 20) ? 2000 : 1000;
+    $registration_fee = ($package_value >= 20) ? 0.2 : 0.1;
     
     // Check if user already applied for this job
     $stmt = $pdo->prepare("SELECT id FROM job_applications WHERE email = ? AND job_id = ?");

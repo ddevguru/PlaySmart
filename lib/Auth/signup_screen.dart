@@ -7,7 +7,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:animated_text_kit/animated_text_kit.dart';
-import 'package:lottie/lottie.dart';
+// import 'package:lottie/lottie.dart'; // Removed Lottie dependency
 import 'login_screen.dart';
 import 'dart:developer' as developer;
 
@@ -177,13 +177,13 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
       builder: (BuildContext context) => Dialog(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        child: SizedBox(
-          height: 200,
-          child: Lottie.network(
-            'https://assets9.lottiefiles.com/packages/lf20_jbrw3hcz.json',
-            repeat: false,
-          ),
-        ),
+        // child: SizedBox(
+        //   height: 200,
+        //   child: Image.asset(
+        //     'assets/icon/logo.jpg',
+        //     fit: BoxFit.contain,
+        //   ),
+        // ),
       ),
     );
     Future.delayed(const Duration(milliseconds: 1500), () {
@@ -266,11 +266,11 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
               ),
               SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: screenWidth * 0.06,
-                    vertical: screenHeight * 0.02,
-                  ),
+                                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: screenWidth * 0.06,
+                      vertical: screenHeight * 0.05, // Increased vertical padding
+                    ),
                   child: Form(
                     key: _formKey,
                     child: Column(
@@ -282,7 +282,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              SizedBox(height: screenHeight * 0.02),
+                              SizedBox(height: screenHeight * 0.04), // Increased spacing
                               Text(
                                 'Welcome to',
                                 style: GoogleFonts.poppins(
@@ -327,7 +327,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                           ),
                         ),
                         ..._buildAnimatedFormFields(screenHeight),
-                        SizedBox(height: screenHeight * 0.03),
+                        SizedBox(height: screenHeight * 0.06), // Increased spacing
                         FadeTransition(
                           opacity: _fadeAnimation,
                           child: Center(
@@ -408,7 +408,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                             ),
                           ),
                         ),
-                        SizedBox(height: screenHeight * 0.02),
+                        SizedBox(height: screenHeight * 0.04), // Increased bottom spacing
                       ],
                     ),
                   ),

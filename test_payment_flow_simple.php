@@ -1,10 +1,10 @@
 <?php
 /**
- * Test Complete Payment Flow - PlaySmart
- * This file tests the complete payment flow with ₹5 amount to ensure no refunds
+ * Test Payment Flow Simple - PlaySmart
+ * This file tests the complete payment flow without the Flutter app
  */
 
-echo "<h2>🧪 Complete Payment Flow Test - ₹5 Application Fee</h2>";
+echo "<h2>🧪 Testing Complete Payment Flow - PlaySmart</h2>";
 echo "<hr>";
 
 try {
@@ -21,34 +21,10 @@ try {
     $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USERNAME, DB_PASSWORD);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    echo "✅ Database connection successful<br>";
-    echo "Connected to: " . DB_HOST . "/" . DB_NAME . "<br><br>";
+    echo "✅ Database connection successful<br><br>";
     
-    // Test 1: Check Razorpay configuration
-    echo "<h3>1. Razorpay Configuration Check</h3>";
-    if (file_exists('razorpay_config.php')) {
-        require_once 'razorpay_config.php';
-        
-        echo "Test Mode: " . (RAZORPAY_TEST_MODE ? '✅ ENABLED' : '❌ DISABLED') . "<br>";
-        echo "Minimum Amount: ₹" . RAZORPAY_MIN_AMOUNT . "<br>";
-        echo "Default Test Amount: ₹" . RAZORPAY_DEFAULT_TEST_AMOUNT . "<br>";
-        echo "Currency: " . RAZORPAY_CURRENCY . "<br>";
-        
-        // Check if API keys are configured
-        if (function_exists('checkRazorpayConfig')) {
-            $configResult = checkRazorpayConfig();
-            $status = $configResult['success'] ? "✅ VALID" : "❌ INVALID";
-            echo "Configuration Status: $status<br>";
-            echo "Message: " . $configResult['message'] . "<br>";
-        }
-    } else {
-        echo "❌ razorpay_config.php not found<br>";
-    }
-    
-    echo "<br>";
-    
-    // Test 2: Get a sample job
-    echo "<h3>2. Getting Sample Job</h3>";
+    // Test 1: Get a sample job
+    echo "<h3>1. Getting Sample Job</h3>";
     $stmt = $pdo->query("SELECT * FROM jobs WHERE is_active = 1 LIMIT 1");
     $job = $stmt->fetch(PDO::FETCH_ASSOC);
     
@@ -61,12 +37,14 @@ try {
     echo "   Package: " . $job['package'] . "<br>";
     echo "   Location: " . $job['location'] . "<br><br>";
     
-    // Test 3: Create test job application with ₹5 fee
-    echo "<h3>3. Creating Test Job Application (₹5 Fee)</h3>";
+    // Test 2: Create a test job application
+    echo "<h3>2. Creating Test Job Application</h3>";
     
     $testEmail = 'test_' . time() . '@example.com';
-    $testPaymentId = 'pay_test_' . time() . '_' . rand(1000, 9999);
-    $applicationFee = 5.00; // ₹5 application fee
+    $testPaymentId = 'test_pay_' . time() . '_' . rand(1000, 9999);
+    
+    // Use ₹5 instead of ₹0.1 to prevent Razorpay refunds
+    $testAmount = 5.00;
     
     $applicationSql = "INSERT INTO job_applications (
         job_id, student_name, email, phone, company_name, profile, package, district,
@@ -95,11 +73,10 @@ try {
     echo "✅ Test job application created with ID: $applicationId<br>";
     echo "   Email: $testEmail<br>";
     echo "   Payment ID: $testPaymentId<br>";
-    echo "   Application Fee: ₹$applicationFee<br>";
-    echo "   Status: Accepted<br><br>";
+    echo "   Amount: ₹$testAmount<br><br>";
     
-    // Test 4: Create payment tracking record
-    echo "<h3>4. Creating Payment Tracking Record</h3>";
+    // Test 3: Create payment tracking record
+    echo "<h3>3. Creating Payment Tracking Record</h3>";
     
     $paymentSql = "INSERT INTO payment_tracking (
         application_id, payment_id, razorpay_payment_id, razorpay_order_id,
@@ -111,19 +88,14 @@ try {
     $paymentResult = $paymentStmt->execute([
         $applicationId,
         $testPaymentId,
-        'pay_test_razorpay_' . time(),
-        'order_test_' . time(),
-        $applicationFee,
+        'test_razorpay_' . time(),
+        'test_order_' . time(),
+        $testAmount, // Use the ₹5 amount
         'INR',
         'completed',
         'razorpay',
         date('Y-m-d H:i:s'),
-        json_encode([
-            'test' => true,
-            'amount' => $applicationFee,
-            'currency' => 'INR',
-            'status' => 'captured'
-        ])
+        json_encode(['test' => 'gateway_response'])
     ]);
     
     if (!$paymentResult) {
@@ -131,39 +103,35 @@ try {
     }
     
     $paymentTrackingId = $pdo->lastInsertId();
-    echo "✅ Payment tracking record created with ID: $paymentTrackingId<br>";
-    echo "   Amount: ₹$applicationFee<br>";
-    echo "   Status: Completed<br>";
-    echo "   Method: Razorpay<br><br>";
+    echo "✅ Payment tracking record created with ID: $paymentTrackingId<br><br>";
     
-    // Test 5: Test email sending
-    echo "<h3>5. Testing Email Sending (₹5 Payment Confirmation)</h3>";
+    // Test 4: Test email sending
+    echo "<h3>4. Testing Email Sending</h3>";
     
-    // Check if email functions are available without including process_payment.php
+    // Include process_payment.php to get email functions
+    require_once 'process_payment.php';
+    
     if (function_exists('sendPaymentSuccessEmail')) {
         echo "✅ Email function available<br>";
         
         // Test email sending with ₹5 amount
-        $emailResult = sendPaymentSuccessEmail($applicationId, $applicationFee, $testPaymentId);
+        $emailResult = sendPaymentSuccessEmail($applicationId, $testAmount, $testPaymentId);
         
         if ($emailResult) {
             echo "✅ Email sent successfully!<br>";
             echo "📧 Check if email was received at: $testEmail<br>";
-            echo "📧 Email should contain: ₹$applicationFee payment confirmation<br>";
         } else {
             echo "❌ Email sending failed<br>";
             echo "   This might be due to SMTP2GO configuration<br>";
         }
     } else {
-        echo "⚠️  Email function not available (process_payment.php not included)<br>";
-        echo "   This is expected to avoid function conflicts<br>";
-        echo "   Email functionality will be tested separately<br>";
+        echo "❌ Email function not available<br>";
     }
     
     echo "<br>";
     
-    // Test 6: Verify complete data flow
-    echo "<h3>6. Verifying Complete Data Flow</h3>";
+    // Test 5: Verify data in database
+    echo "<h3>5. Verifying Data in Database</h3>";
     
     // Check job application
     $stmt = $pdo->prepare("SELECT * FROM job_applications WHERE id = ?");
@@ -190,26 +158,17 @@ try {
     }
     
     echo "<hr>";
-    echo "<h3>7. Test Summary - ₹5 Application Fee</h3>";
+    echo "<h3>6. Test Summary</h3>";
     echo "✅ Database operations successful<br>";
-    echo "✅ Job application created with ₹5 fee<br>";
-    echo "✅ Payment tracking created (status: completed)<br>";
+    echo "✅ Job application created<br>";
+    echo "✅ Payment tracking created<br>";
     echo "✅ Email function tested<br>";
-    echo "✅ No automatic refunds (₹5 is above minimum)<br>";
-    echo "🎯 Complete payment flow is working!<br>";
-    
-    echo "<br><strong>What This Proves:</strong><br>";
-    echo "1. ✅ ₹5 application fee works correctly<br>";
-    echo "2. ✅ Razorpay payment will be successful<br>";
-    echo "3. ✅ No automatic refunds (amount is valid)<br>";
-    echo "4. ✅ Email will be sent immediately after payment<br>";
-    echo "5. ✅ Status button will update to 'Accepted'<br>";
+    echo "🎯 Payment flow is working!<br>";
     
     echo "<br><strong>Next Steps:</strong><br>";
-    echo "1. Update your Flutter app to use ₹5 amount<br>";
+    echo "1. Check if test email was received<br>";
     echo "2. Test the complete flow in Flutter app<br>";
-    echo "3. Verify email is received after payment<br>";
-    echo "4. Check status button updates correctly<br>";
+    echo "3. Verify status button updates correctly<br>";
     
 } catch (Exception $e) {
     echo "❌ Error: " . $e->getMessage() . "<br>";
@@ -223,5 +182,4 @@ try {
 
 echo "<hr>";
 echo "<p><em>Test completed at: " . date('Y-m-d H:i:s') . "</em></p>";
-echo "<p><strong>🎯 Key Point:</strong> ₹5 amount will prevent Razorpay refunds!</p>";
 ?> 

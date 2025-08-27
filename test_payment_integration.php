@@ -75,8 +75,8 @@ if (file_exists('razorpay_config.php')) {
 echo "<h2>Test 4: Payment Integration API Test</h2>";
 echo "<form id='paymentTestForm'>";
 echo "<label>Application ID: <input type='number' id='appId' value='1' required></label><br>";
-echo "<label>Payment Amount: <input type='number' id='amount' value='2000' required></label><br>";
-echo "<label>Job Type: <select id='jobType'><option value='higher_package'>Higher Package (₹2000)</option><option value='local'>Local (₹1000)</option></select></label><br>";
+echo "<label>Payment Amount: <input type='number' id='amount' value='0.2' required></label><br>";
+echo "<label>Job Type: <select id='jobType'><option value='higher_package'>Higher Package (₹0.2)</option><option value='local'>Local (₹0.1)</option></select></label><br>";
 echo "<button type='button' onclick='testPaymentIntegration()'>Test Payment Integration</button>";
 echo "</form>";
 

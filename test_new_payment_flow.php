@@ -18,14 +18,14 @@ echo json_encode([
     'success' => true,
     'message' => 'New payment flow test successful',
     'test_data' => [
-        'payment_amount' => 2000,
+        'payment_amount' => 0.2,
         'job_type' => 'higher_package',
         'timestamp' => date('Y-m-d H:i:s'),
         'status' => 'ready_for_razorpay'
     ],
     'razorpay_data' => [
         'key_id' => 'rzp_test_YOUR_TEST_KEY_ID', // Replace with your actual key
-        'amount' => 200000, // 2000 * 100 (in paise)
+        'amount' => 20, // 0.2 * 100 (in paise)
         'currency' => 'INR',
         'name' => 'PlaySmart',
         'description' => 'Job Application Fee - higher_package',

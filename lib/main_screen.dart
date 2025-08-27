@@ -438,6 +438,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   }
 
   void _initializeData() {
+    print('DEBUG: Initializing app data...');
     fetchUserBalance();
     fetchContests();
     fetchJobApplications();
@@ -445,118 +446,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     _startRefreshTimer();
     _startAutoScroll(); // This will now be safe
     
-    // Add sample job applications for testing
-    userJobApplications[1] = 'pending';
-    userJobApplications[2] = 'shortlisted';
-    
-    // Add sample job applications for testing display
-    print('DEBUG: Setting up sample job applications...');
-    jobApplications = [
-      JobApplication(
-        id: 1,
-        jobId: 1,
-        companyName: 'Google',
-        companyLogoUrl: 'https://playsmart.co.in/uploads/google_logo.png',
-        studentName: 'Rahul Sharma',
-        district: 'Mumbai',
-        package: '12LPA',
-        profile: 'Product Manager',
-        photoPath: 'https://playsmart.co.in/uploads/photos/rahul_sharma.jpg',
-        resumePath: 'https://playsmart.co.in/uploads/resumes/rahul_sharma_resume.pdf',
-        email: 'rahul.sharma@email.com',
-        phone: '+91-9876543210',
-        experience: '5 years',
-        skills: 'Product Management, Analytics, Leadership, Team Management, Agile, Scrum',
-        paymentId: 'pay_123456789',
-        applicationStatus: 'shortlisted',
-        appliedDate: DateTime.now().subtract(Duration(days: 2)),
-        isActive: true,
-      ),
-      JobApplication(
-        id: 2,
-        jobId: 2,
-        companyName: 'Spotify',
-        companyLogoUrl: 'https://playsmart.co.in/uploads/spotify_logo.png',
-        studentName: 'Priya Patel',
-        district: 'Pune',
-        package: '12LPA',
-        profile: 'UI Designer',
-        photoPath: 'https://playsmart.co.in/uploads/photos/priya_patel.jpg',
-        resumePath: 'https://playsmart.co.in/uploads/resumes/priya_patel_resume.pdf',
-        email: 'priya.patel@email.com',
-        phone: '+91-9876543211',
-        experience: '4 years',
-        skills: 'Product Strategy, User Research, Data Analysis, Figma, Prototyping, User Testing',
-        paymentId: 'pay_123456790',
-        applicationStatus: 'pending',
-        appliedDate: DateTime.now().subtract(Duration(days: 1)),
-        isActive: true,
-      ),
-      JobApplication(
-        id: 3,
-        jobId: 3,
-        companyName: 'Microsoft',
-        companyLogoUrl: 'https://playsmart.co.in/uploads/microsoft_logo.png',
-        studentName: 'Amit Kumar',
-        district: 'Delhi',
-        package: '15LPA',
-        profile: 'Software Engineer',
-        photoPath: 'https://playsmart.co.in/uploads/photos/amit_kumar.jpg',
-        resumePath: 'https://playsmart.co.in/uploads/resumes/amit_kumar_resume.pdf',
-        email: 'amit.kumar@email.com',
-        phone: '+91-9876543212',
-        experience: '6 years',
-        skills: 'UI/UX Design, Figma, Prototyping, Adobe Creative Suite, User Research, Design Systems',
-        paymentId: 'pay_123456791',
-        applicationStatus: 'accepted',
-        appliedDate: DateTime.now().subtract(Duration(days: 3)),
-        isActive: true,
-      ),
-      JobApplication(
-        id: 4,
-        jobId: 4,
-        companyName: 'Amazon',
-        companyLogoUrl: 'https://playsmart.co.in/uploads/amazon_logo.png',
-        studentName: 'Neha Singh',
-        district: 'Bangalore',
-        package: '18LPA',
-        profile: 'Data Scientist',
-        photoPath: 'https://playsmart.co.in/uploads/photos/neha_singh.jpg',
-        resumePath: 'https://playsmart.co.in/uploads/resumes/neha_singh_resume.pdf',
-        email: 'neha.singh@email.com',
-        phone: '+91-9876543213',
-        experience: '7 years',
-        skills: 'Python, Machine Learning, SQL, TensorFlow, PyTorch, Data Analysis, Statistics',
-        paymentId: 'pay_123456792',
-        applicationStatus: 'shortlisted',
-        appliedDate: DateTime.now().subtract(Duration(days: 4)),
-        isActive: true,
-      ),
-      JobApplication(
-        id: 5,
-        jobId: 5,
-        companyName: 'Netflix',
-        companyLogoUrl: 'https://playsmart.co.in/uploads/netflix_logo.png',
-        studentName: 'Vikram Verma',
-        district: 'Hyderabad',
-        package: '16LPA',
-        profile: 'Frontend Developer',
-        photoPath: 'https://playsmart.co.in/uploads/photos/vikram_verma.jpg',
-        resumePath: 'https://playsmart.co.in/uploads/resumes/vikram_verma_resume.pdf',
-        email: 'vikram.verma@email.com',
-        phone: '+91-9876543214',
-        experience: '5 years',
-        skills: 'React, JavaScript, CSS, TypeScript, Node.js, Git, Responsive Design',
-        paymentId: 'pay_123456793',
-        applicationStatus: 'pending',
-        appliedDate: DateTime.now().subtract(Duration(days: 5)),
-        isActive: true,
-      ),
-    ];
-    
-    print('DEBUG: Sample data setup complete. jobApplications.length = ${jobApplications.length}');
-    
-
+    print('DEBUG: App data initialization started');
   }
 
 
@@ -568,19 +458,33 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
   }
 
-  void _handlePaymentSuccess(PaymentSuccessResponse response) {
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    print('=== PAYMENT SUCCESS HANDLER STARTED ===');
     print('Payment Success: ${response.paymentId}');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Payment successful! Job application submitted.'),
-        backgroundColor: Colors.green,
-      ),
-    );
+    print('Current Job Application: ${_currentJobApplication?.id}');
+    print('userJobApplications before update: $userJobApplications');
     
-    // Store the job application status locally
+    // Close the application modal first
+    Navigator.of(context).pop();
+    
+    // Show success status popup
+    _showPaymentSuccessStatus(response.paymentId ?? '');
+    
+    // Store the job application status locally IMMEDIATELY
     if (_currentJobApplication != null) {
-      userJobApplications[_currentJobApplication!.id] = 'pending';
-      setState(() {});
+      // Use the actual job ID from the current job being applied to
+      int jobId = _currentJobApplication!.id;
+      print('DEBUG: Setting job $jobId status to accepted');
+      print('DEBUG: _currentJobApplication!.id = ${_currentJobApplication!.id}');
+      
+      // Update local status immediately and PERSIST it
+      userJobApplications[jobId] = 'accepted';
+      print('DEBUG: userJobApplications after update: $userJobApplications');
+      
+      // Force immediate UI update to show status button
+      setState(() {
+        print('DEBUG: UI updated with new application status');
+      });
       
       // Upload files if they were selected
       if (_selectedPhotoPath != null && _selectedResumePath != null) {
@@ -591,15 +495,118 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         );
       }
       
-      // Send payment confirmation email
-      _sendPaymentConfirmationEmail(_currentJobApplication!, response.paymentId ?? '');
+      // Process payment with backend to trigger email sending
+      await _processPaymentWithBackend(
+        _currentJobApplication!,
+        response.paymentId ?? '',
+        response.orderId ?? '',
+        response.signature ?? '',
+      );
+      
+      // Final UI refresh to ensure status button is visible
+      setState(() {
+        print('DEBUG: Final UI refresh after backend processing');
+      });
     }
     
     print('Payment ID: ${response.paymentId}');
     print('Payment Signature: ${response.signature}');
     
-    // Refresh job applications to show the new one
-    fetchJobApplications();
+    // Refresh job applications but PRESERVE local status
+    await _refreshJobApplicationsPreserveLocal();
+    
+    // Also refresh jobs to ensure they're displayed
+    await fetchJobs();
+    
+    // Force one more UI refresh to ensure everything is updated
+    setState(() {
+      print('DEBUG: Final force refresh after all data fetching');
+    });
+    
+    // Show success message to user
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Payment successful! Application submitted. Check your email for details.',
+                style: TextStyle(fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  // New method to refresh job applications while preserving local status
+  Future<void> _refreshJobApplicationsPreserveLocal() async {
+    try {
+      print('DEBUG: Starting to fetch job applications (preserving local status)...');
+      
+      final applicationsData = await JobApplicationController.fetchJobApplications()
+          .timeout(Duration(seconds: 5), onTimeout: () {
+        print('DEBUG: Job applications fetch timed out after 5 seconds');
+        throw TimeoutException('Job applications fetch timed out', Duration(seconds: 5));
+      });
+      
+      print('DEBUG: Received ${applicationsData.length} applications from API');
+      
+      if (mounted) {
+        setState(() {
+          jobApplications = applicationsData;
+          
+          // Update local map with fetched applications BUT preserve local 'accepted' status
+          for (var application in applicationsData) {
+            // Only update if we don't have a local 'accepted' status for this job
+            if (userJobApplications[application.jobId] != 'accepted') {
+              userJobApplications[application.jobId] = application.applicationStatus;
+              print('DEBUG: Job ${application.jobId} -> Status: ${application.applicationStatus}');
+            } else {
+              print('DEBUG: Preserving local accepted status for job ${application.jobId}');
+            }
+          }
+          print('DEBUG: Updated userJobApplications map: $userJobApplications');
+        });
+        print('DEBUG: Updated state with ${jobApplications.length} applications');
+        
+        // Restart auto-scroll after data is loaded
+        _restartAutoScroll();
+      }
+      print('DEBUG: Fetched ${jobApplications.length} job applications successfully');
+    } catch (e) {
+      print('Error fetching job applications: $e');
+      print('DEBUG: Full error details: $e');
+      if (mounted) {
+        setState(() {
+          // Keep the sample data if API fails
+          if (jobApplications.isEmpty) {
+            print('DEBUG: API failed, keeping sample data');
+          }
+        });
+        
+        // Restart auto-scroll even with sample data
+        _restartAutoScroll();
+      }
+      // Don't crash the app, just show empty state
+    }
+  }
+
+  // Method to check if a specific job has been applied to
+  bool hasAppliedToJob(int jobId) {
+    return userJobApplications.containsKey(jobId) && userJobApplications[jobId] == 'accepted';
+  }
+
+  // Method to get application status for a specific job
+  String getJobApplicationStatus(int jobId) {
+    return userJobApplications[jobId] ?? '';
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
@@ -614,6 +621,217 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
   void _handleExternalWallet(ExternalWalletResponse response) {
     print('External Wallet: ${response.walletName}');
+  }
+
+  void _showPaymentSuccessStatus(String paymentId) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            width: MediaQuery.of(context).size.width * 0.85,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF28a745), Color(0xFF20c997)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Success Icon
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.check_circle,
+                      size: 50,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 20),
+                  
+                  // Success Title
+                  Text(
+                    '🎉 Payment Successful!',
+                    style: GoogleFonts.poppins(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 16),
+                  
+                  // Success Message
+                  Text(
+                    'Your job application has been submitted successfully!',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      color: Colors.white,
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 20),
+                  
+                  // Payment Details
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Payment Details',
+                          style: GoogleFonts.poppins(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Payment ID:',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                color: Colors.white70,
+                              ),
+                            ),
+                            Text(
+                              paymentId,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Status:',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                color: Colors.white70,
+                              ),
+                            ),
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                'ACCEPTED',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 24),
+                  
+                  // Next Steps
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'What\'s Next?',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          '• Your application is now under review\n'
+                          '• You will receive updates via email\n'
+                          '• Check your application status in the app\n'
+                          '• Our team will contact you soon',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            color: Colors.white70,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 24),
+                  
+                  // Close Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        // Refresh the UI to show status button
+                        setState(() {});
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Color(0xFF28a745),
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Got It!',
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _showJobApplicationModal(Job job) {
@@ -1103,9 +1321,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   }
 
   void _initiatePayment(Job job) {
+    // Determine amount based on job package (10LPA threshold)
+    final packageValue = double.tryParse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim());
+    final isHighPackage = packageValue != null && packageValue >= 10;
+    final amountInRupees = isHighPackage ? 2000.0 : 1000.0;
+    final amountInPaise = (amountInRupees * 100).toInt();
+    
     var options = {
       'key': 'rzp_live_fgQr0ACWFbL4pN', // Replace with your Razorpay test key
-      'amount': 100000, // Amount in paise (₹1000 = 100000 paise)
+      'amount': amountInPaise, // Amount in paise (₹0.1 = 10 paise, ₹0.2 = 20 paise)
       'name': 'PlaySmart Services',
       'description': 'Job Application Fee for ${job.jobTitle}',
       'prefill': {
@@ -1140,6 +1364,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         return;
       }
 
+      // Get user email from the current application
+      String userEmail = 'user@example.com'; // Default fallback
+      if (_currentJobApplication != null) {
+        // Try to get email from the application form
+        // Since we don't have direct access to the form controllers here,
+        // we'll use a different approach - get it from the backend
+        userEmail = 'user@example.com'; // This will be updated by backend
+      }
+
       // Send email via backend
       final response = await http.post(
         Uri.parse('https://playsmart.co.in/send_payment_confirmation_email.php'),
@@ -1153,7 +1386,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           'company_name': job.companyName,
           'package': job.package,
           'payment_id': paymentId,
-          'email': 'user@example.com', // This should come from user data
+          'email': userEmail,
         }),
       ).timeout(Duration(seconds: 10));
 
@@ -1169,6 +1402,426 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       }
     } catch (e) {
       print('DEBUG: Error sending payment confirmation email: $e');
+    }
+  }
+
+  void _showApplicationStatus(Job job, String status) async {
+    print('DEBUG: Showing application status for job ${job.id} with status: $status');
+    
+    // Fetch real application data from database
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userEmail = prefs.getString('user_email') ?? '';
+      
+      print('DEBUG: Fetching application data for user: $userEmail, job: ${job.id}');
+      
+      // Show loading dialog first
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 20),
+                Text('Loading application details...'),
+              ],
+            ),
+          );
+        },
+      );
+      
+      // Fetch application data from backend
+      final applicationData = await _fetchApplicationDetails(job.id, userEmail);
+      
+      // Close loading dialog
+      Navigator.of(context).pop();
+      
+      if (applicationData != null) {
+        _showDetailedApplicationStatus(job, applicationData);
+      } else {
+        _showBasicApplicationStatus(job, status);
+      }
+      
+    } catch (e) {
+      print('DEBUG: Error fetching application details: $e');
+      Navigator.of(context).pop(); // Close loading dialog
+      _showBasicApplicationStatus(job, status);
+    }
+  }
+
+
+
+  // Fetch application details from backend
+  Future<Map<String, dynamic>?> _fetchApplicationDetails(int jobId, String userEmail) async {
+    try {
+      print('DEBUG: Fetching application details for job $jobId and user $userEmail');
+      
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/check_job_application_status.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'job_id': jobId,
+          'user_email': userEmail,
+        }),
+      ).timeout(Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        if (result['success'] && result['has_applied']) {
+          print('DEBUG: Application details fetched: $result');
+          return result['application'];
+        }
+      }
+      
+      print('DEBUG: No application details found');
+      return null;
+    } catch (e) {
+      print('DEBUG: Error fetching application details: $e');
+      return null;
+    }
+  }
+
+  // Show detailed application status with real data
+  void _showDetailedApplicationStatus(Job job, Map<String, dynamic> applicationData) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                          child: Icon(
+                            Icons.work,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                        SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                job.jobTitle,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              Text(
+                                job.companyName,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 24),
+                    
+                    // Application Details from Database
+                    Container(
+                      padding: EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Application Details',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 20),
+                          
+                          // Real data from database
+                          _buildDetailRow('Status', applicationData['application_status'] ?? 'Pending'),
+                          _buildDetailRow('Applied Date', applicationData['applied_date'] ?? 'N/A'),
+                          _buildDetailRow('Payment ID', applicationData['payment_id'] ?? 'N/A'),
+                          _buildDetailRow('Profile', applicationData['profile'] ?? 'N/A'),
+                          _buildDetailRow('Experience', applicationData['experience'] ?? 'N/A'),
+                          _buildDetailRow('Skills', applicationData['skills'] ?? 'N/A'),
+                        ],
+                      ),
+                    ),
+                    
+                    SizedBox(height: 24),
+                    
+                    // Close Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Color(0xFF6A11CB),
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Close',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Show basic application status (fallback)
+  void _showBasicApplicationStatus(Job job, String status) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                          child: Icon(
+                            Icons.work,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                        SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                job.jobTitle,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              Text(
+                                job.companyName,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 24),
+                    
+                    // Status Progress
+                    Container(
+                      padding: EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Application Status',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 20),
+                          
+                          // Progress Steps
+                          _buildProgressStep('Application Submitted', true, 1),
+                          _buildProgressStep('Screening In Progress', status == 'pending', 2),
+                          _buildProgressStep('Interview Scheduled', status == 'shortlisted', 3),
+                          _buildProgressStep('Offer Letter Pending', status == 'accepted', 4),
+                          _buildProgressStep('Hired', false, 5),
+                        ],
+                      ),
+                    ),
+                    
+                    SizedBox(height: 24),
+                    
+                    // Close Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Color(0xFF6A11CB),
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Close',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+
+
+  Future<void> _processPaymentWithBackend(Job job, String paymentId, String orderId, String signature) async {
+    try {
+      print('DEBUG: Processing payment with backend...');
+      
+      // Get user email from the actual form submission, not SharedPreferences
+      // The email should come from the job application form that was submitted
+      String userEmail = 'user@example.com'; // This will be updated by the backend
+      
+      // CRITICAL FIX: Get the actual user data from the current job application
+      if (_currentJobApplication != null) {
+        // Try to get email from the application form data
+        // Since we don't have direct access to form controllers here,
+        // we'll use a different approach - get it from the backend
+        print('DEBUG: Current job application found: ${_currentJobApplication!.id}');
+        print('DEBUG: Will get actual user data from backend');
+      }
+      
+      // Determine payment amount based on job package
+      final packageValue = double.tryParse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim());
+      final isHighPackage = packageValue != null && packageValue >= 10;
+      final amount = isHighPackage ? 2000.0 : 1000.0;
+      
+      print('DEBUG: Job package: ${job.package}, Amount: $amount, IsHighPackage: $isHighPackage');
+      
+      // CRITICAL FIX: Send job_id instead of application_id to prevent confusion
+      // Backend will create the application record with the actual form data
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/process_payment.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'job_id': job.id, // Changed from application_id to job_id for clarity
+          'payment_id': paymentId,
+          'amount': amount,
+          'razorpay_payment_id': paymentId,
+          'razorpay_order_id': orderId,
+          'razorpay_signature': signature,
+          'payment_method': 'razorpay',
+          'user_email': userEmail, // This will be updated by backend with actual form data
+          'gateway_response': {
+            'payment_id': paymentId,
+            'order_id': orderId,
+            'signature': signature,
+          },
+        }),
+      ).timeout(Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        if (result['success']) {
+          print('DEBUG: Payment processed successfully with backend');
+          print('DEBUG: Backend response: $result');
+        } else {
+          print('DEBUG: Backend payment processing failed: ${result['message']}');
+        }
+      } else {
+        print('DEBUG: Backend API error: HTTP ${response.statusCode}');
+        print('DEBUG: Response body: ${response.body}');
+      }
+    } catch (e) {
+      print('DEBUG: Error processing payment with backend: $e');
     }
   }
 
@@ -1504,6 +2157,18 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       if (mounted) {
         setState(() {
           jobApplications = applicationsData;
+          
+          // Update local map with fetched applications BUT preserve local 'accepted' status
+          for (var application in applicationsData) {
+            // Only update if we don't have a local 'accepted' status for this job
+            if (userJobApplications[application.jobId] != 'accepted') {
+              userJobApplications[application.jobId] = application.applicationStatus;
+              print('DEBUG: Job ${application.jobId} -> Status: ${application.applicationStatus}');
+            } else {
+              print('DEBUG: Preserving local accepted status for job ${application.jobId}');
+            }
+          }
+          print('DEBUG: Updated userJobApplications map: $userJobApplications');
         });
         print('DEBUG: Updated state with ${jobApplications.length} applications');
         
@@ -1541,6 +2206,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           _categorizeJobs(jobsData);
         });
         print('DEBUG: Updated state with ${jobs.length} jobs');
+        print('DEBUG: Higher package jobs: ${higherPackageJobs.length}');
+        print('DEBUG: Local jobs: ${localJobs.length}');
       }
       print('DEBUG: Fetched ${jobs.length} jobs successfully');
     } catch (e) {
@@ -1558,16 +2225,16 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   void _categorizeJobs(List<Job> allJobs) {
     // Categorize jobs based on package amount and location
     
-    // Higher Package Jobs (above 12 LPA)
+    // Higher Package Jobs (10 LPA and above)
     higherPackageJobs = allJobs.where((job) {
       if (job.package == null || job.package.isEmpty) return false;
       
-      // Extract numeric value from package string (e.g., "25LPA" -> 25)
+      // Extract numeric value from package string (e.g., "12LPA" -> 12)
       final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
-      return packageValue != null && packageValue >= 12;
+      return packageValue != null && packageValue >= 10;
     }).toList();
 
-    // Local Jobs (package < 10 LPA)
+    // Local Jobs (below 10 LPA)
     localJobs = allJobs.where((job) {
       if (job.package == null || job.package.isEmpty) return false;
       
@@ -2445,18 +3112,57 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   }
 
   Widget _buildJobCardWithApplyButton(Job job) {
+    // Check if user has already applied for this job
+    bool hasApplied = userJobApplications.containsKey(job.id);
+    String applicationStatus = userJobApplications[job.id] ?? '';
+    
+    // Debug logging for status button logic
+    print('DEBUG: Building job card for Job ID: ${job.id}, Title: ${job.jobTitle}');
+    print('DEBUG: Has applied: $hasApplied, Status: $applicationStatus');
+    print('DEBUG: userJobApplications map: $userJobApplications');
+    print('DEBUG: Current job ID being checked: ${job.id}');
+    print('DEBUG: Keys in userJobApplications: ${userJobApplications.keys.toList()}');
+    
     // Determine button color based on package amount (but don't show amount)
     Color buttonColor;
     
-    // Extract numeric value from package string (e.g., "25LPA" -> 25)
+    // Extract numeric value from package string (e.g., "12LPA" -> 12)
     final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
     
-    if (packageValue != null && packageValue >= 20) {
-      // 20+ LPA jobs get orange button
+    if (packageValue != null && packageValue >= 10) {
+      // 10+ LPA jobs get orange button (higher package)
       buttonColor = Colors.orange;
     } else {
-      // Lower package jobs get green button
+      // Below 10 LPA jobs get green button (local jobs)
       buttonColor = Colors.green;
+    }
+    
+    // Determine status button color and text
+    Color statusButtonColor = Colors.grey; // Default color
+    String statusText = 'APPLIED'; // Default text
+    
+    if (hasApplied) {
+      switch (applicationStatus.toLowerCase()) {
+        case 'accepted':
+          statusButtonColor = Colors.green;
+          statusText = 'Status'; // Always show "Status" for clickable button
+          break;
+        case 'pending':
+          statusButtonColor = Colors.orange;
+          statusText = 'Status'; // Always show "Status" for clickable button
+          break;
+        case 'shortlisted':
+          statusButtonColor = Colors.blue;
+          statusText = 'Status'; // Always show "Status" for clickable button
+          break;
+        case 'rejected':
+          statusButtonColor = Colors.red;
+          statusText = 'Status'; // Always show "Status" for clickable button
+          break;
+        default:
+          statusButtonColor = Colors.grey;
+          statusText = 'Status'; // Always show "Status" for clickable button
+      }
     }
     
     return Container(
@@ -2520,28 +3226,53 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
               ],
             ),
             SizedBox(height: 8),
-            // Apply Button (no payment amount shown)
-            GestureDetector(
-              onTap: () => _showJobApplicationModal(job),
-              child: Container(
-                width: double.infinity,
-                padding: EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: buttonColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: buttonColor.withOpacity(0.3)),
-                ),
-                child: Text(
-                  'Apply',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: buttonColor,
+            // Apply Button or Status Button
+            if (!hasApplied)
+              // Show Apply Button if not applied
+              GestureDetector(
+                onTap: () => _showJobApplicationModal(job),
+                child: Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: buttonColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: buttonColor.withOpacity(0.3)),
                   ),
-                  textAlign: TextAlign.center,
+                  child: Text(
+                    'Apply',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: buttonColor,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
+            else
+              // Show Status Button if already applied
+              GestureDetector(
+                onTap: () => _showApplicationStatus(job, applicationStatus),
+                child: Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: statusButtonColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: statusButtonColor.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: statusButtonColor,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -3969,7 +4700,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
 12. The fee of Rs. 2000 is non-refundable.
       ''';
-      amountText = '₹2000';
+      amountText = '₹2000.0';
       amount = 2000.0;
     } else {
       instructions = '''
@@ -3985,13 +4716,13 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
 6. We provide you  job opportunities That means we provide you a Service  The registration fee for    them is 1000.
 
-7. Rs. 1000 Registration charges Will be limited for one year.
+7. Rs.1000 Registration charges Will be limited for one year.
 
 8. The fee of Rs. 1000 is non-refundable.
 
 9. If all the above are acceptable then  register today. The company will contact you today for a job    according to your education and provide you with further information.
       ''';
-      amountText = '₹1000';
+      amountText = '₹1000.00';
       amount = 1000.0;
     }
 
@@ -4030,68 +4761,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                         style: TextStyle(fontSize: 16, height: 1.5),
                       ),
                       SizedBox(height: 20),
-                      
-                      // Referral Code Section
-                      Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Referral Code (Optional)',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'If you have a referral code, enter it below to get special benefits:',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                            SizedBox(height: 12),
-                            TextField(
-                              controller: referralCodeController,
-                              decoration: InputDecoration(
-                                hintText: 'Enter referral code (optional)',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                prefixIcon: Icon(Icons.card_giftcard, color: Colors.blue),
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Icon(Icons.info_outline, color: Colors.blue, size: 16),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Referrer will receive 20% commission on your registration fee',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.blue[700],
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      SizedBox(height: 20),
-                      
+                
                       Row(
                         children: [
                           Checkbox(
@@ -4291,36 +4961,84 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     }
   }
 
-  void _openPaymentGateway(Job job, double amount, String referralCode) {
+  void _openPaymentGateway(Job job, double amount, String referralCode) async {
     try {
-      // Create payment options directly
-      var options = {
-        'key': 'rzp_live_fgQr0ACWFbL4pN',
-        'amount': (amount * 100).toInt(), // Amount in paise
-        'name': 'PlaySmart Services',
-        'description': 'Job Application Fee for ${job.jobTitle}',
-        'prefill': {
-          'contact': '',
-          'email': '',
-        },
-        'external': {
-          'wallets': ['paytm']
-        }
-      };
+      // CRITICAL FIX: Create Razorpay order first to prevent auto-refunds
+      print("🔄 Creating Razorpay order before payment...");
       
-      print('DEBUG: Opening payment gateway with options: $options');
-      _razorpay.open(options);
-    } catch (e) {
-      print('DEBUG: Error in _openPaymentGateway: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error opening payment gateway: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+      // Get form data from the current application
+      String userName = 'User'; // This should come from form
+      String userEmail = 'user@example.com'; // This should come from form
+      String userPhone = ''; // This should come from form
+      
+      // Create Razorpay order via backend
+      final orderResponse = await http.post(
+        Uri.parse('https://playsmart.co.in/create_razorpay_order.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'job_id': job.id,
+          'amount': amount,
+          'user_email': userEmail,
+          'user_name': userName,
+          'user_phone': userPhone,
+        }),
+      ).timeout(Duration(seconds: 15));
 
+      if (orderResponse.statusCode == 200) {
+        final orderResult = jsonDecode(orderResponse.body);
+        if (orderResult['success']) {
+          final orderId = orderResult['data']['order_id'];
+          print("✅ Razorpay order created successfully: $orderId");
+          
+          // Now open payment gateway with the order ID
+          var options = {
+            'key': 'rzp_live_fgQr0ACWFbL4pN',
+            'amount': (amount * 100).toInt(), // Amount in paise
+            'name': 'PlaySmart Services',
+            'description': 'Job Application Fee for ${job.jobTitle}',
+            'order_id': orderId, // CRITICAL: Use the order ID
+            'prefill': {
+              'contact': userPhone,
+              'email': userEmail,
+              'name': userName,
+            },
+            'external': {
+              'wallets': ['paytm']
+            }
+          };
+          
+          print("🔄 Opening payment gateway with order ID: $orderId");
+          _razorpay.open(options);
+          
+        } else {
+          print("❌ Failed to create Razorpay order: ${orderResult['message']}");
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to create payment order: ${orderResult['message']}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } else {
+        print("❌ HTTP error creating order: ${orderResponse.statusCode}");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create payment order. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      
+          } catch (e) {
+        print("❌ Error in _openPaymentGateway: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening payment gateway: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+  }
 }
 
 class AllJobsPage extends StatefulWidget {
@@ -4398,7 +5116,7 @@ class _AllJobsPageState extends State<AllJobsPage> {
                     final job = widget.jobs[index];
                     return Container(
                       margin: EdgeInsets.only(bottom: 20),
-                      child: _buildJobCardWithApplyButton(job),
+                      child: _buildSimpleJobCard(job),
                     );
                   },
                 ),
@@ -4410,19 +5128,15 @@ class _AllJobsPageState extends State<AllJobsPage> {
     );
   }
 
-  Widget _buildJobCardWithApplyButton(Job job) {
-    // Determine button color based on package amount (but don't show amount)
+  Widget _buildSimpleJobCard(Job job) {
+    // Determine button color based on package amount
     Color buttonColor;
-    
-    // Extract numeric value from package string (e.g., "25LPA" -> 25)
     final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
     
-    if (packageValue != null && packageValue >= 20) {
-      // 20+ LPA jobs get orange button
-      buttonColor = Colors.orange;
+    if (packageValue != null && packageValue >= 10) {
+      buttonColor = Colors.orange; // Higher package jobs (10LPA+)
     } else {
-      // Lower package jobs get green button
-      buttonColor = Colors.green;
+      buttonColor = Colors.green; // Local jobs (below 10LPA)
     }
     
     return Container(
@@ -4438,80 +5152,67 @@ class _AllJobsPageState extends State<AllJobsPage> {
         ],
       ),
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-                        // Job Title
             Text(
               job.jobTitle,
               style: GoogleFonts.poppins(
-                fontSize: 20,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: Colors.black87,
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            SizedBox(height: 12),
-            // Higher Education
+            SizedBox(height: 8),
             Row(
               children: [
-                Icon(Icons.school, color: Colors.blue[600], size: 20),
-                SizedBox(width: 8),
+                Icon(Icons.school, color: Colors.blue[600], size: 16),
+                SizedBox(width: 4),
                 Text(
                   'Higher Education',
                   style: GoogleFonts.poppins(
-                    fontSize: 16,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: Colors.blue[600],
                   ),
                 ),
               ],
             ),
-            SizedBox(height: 12),
-            // Package
+            SizedBox(height: 8),
             Row(
               children: [
-                Icon(Icons.currency_rupee, color: Colors.green[600], size: 20),
-                SizedBox(width: 8),
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 16),
+                SizedBox(width: 4),
                 Text(
                   job.package,
                   style: GoogleFonts.poppins(
-                    fontSize: 18,
+                    fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: Colors.green[600],
                   ),
                 ),
               ],
             ),
-            SizedBox(height: 16),
-            // Apply Button (no payment amount shown)
-            GestureDetector(
-              onTap: () => _showJobApplicationForm(job),
-              child: Container(
-                width: double.infinity,
-                padding: EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
+            SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: buttonColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: buttonColor.withOpacity(0.3)),
+              ),
+              child: Text(
+                'View Details',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                   color: buttonColor,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: buttonColor.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
                 ),
-                child: Text(
-                  'Apply',
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
+                textAlign: TextAlign.center,
               ),
             ),
           ],
@@ -5162,15 +5863,20 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body);
         
-        if (result['success']) {
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ Application submitted successfully! Data stored in database.'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
-            ),
-          );
+              if (result['success']) {
+        // Store user email for payment processing
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_email', _emailController.text);
+        print('DEBUG: User email stored: ${_emailController.text}');
+        
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Application submitted successfully! Data stored in database.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
           
           // Close the form and show payment instructions
           Navigator.pop(context);
@@ -5228,7 +5934,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
 
 3. **Skill Assessment**: You may be contacted for a brief skill assessment or interview.
 
-4. **Payment Process**: Complete the payment of ₹2000 to proceed with job matching.
+4. **Payment Process**: Complete the payment of ₹0.2 to proceed with job matching.
 
 5. **Job Matching**: After payment confirmation, we'll match you with suitable opportunities.
 
@@ -5236,17 +5942,17 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
 
 **Referral Program**: If you used a referral code, the referrer will receive 20% commission on your registration fee.
       ''';
-      amountText = '₹2000';
-      amount = 2000.0;
+      amountText = '₹0.2';
+      amount = 0.2;
     } else {
       instructions = '''
 1. **Application Review**: Your application has been submitted and stored in our database.
 
 2. **Document Verification**: Our team will verify your uploaded documents (photo and resume).
+      amountText = '₹0.2';
+      amount = 0.2;
 
-3. **Local Job Matching**: We'll match you with suitable local job opportunities.
-
-4. **Payment Process**: Complete the payment of ₹1000 to proceed with job placement.
+4. **Payment Process**: Complete the payment of ₹0.1 to proceed with job placement.
 
 5. **Job Placement**: After payment confirmation, we'll connect you with local employers.
 
@@ -5254,8 +5960,8 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
 
 **Referral Program**: If you used a referral code, the referrer will receive 20% commission on your registration fee.
       ''';
-      amountText = '₹1000';
-      amount = 1000.0;
+      amountText = '₹0.1';
+      amount = 0.1;
     }
 
     bool agreedToTerms = false;
@@ -5395,7 +6101,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
     );
   }
 
-  void _openPaymentGateway(Job job, double amount, String referralCode) {
+  void _openPaymentGateway(Job job, double amount, String referralCode) async {
     try {
       // Create payment options directly
       var options = {

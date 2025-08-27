@@ -88,7 +88,7 @@ try {
             // Test 4: Payment Gateway
             echo "<h2>4. Testing Payment Gateway</h2>";
             $paymentData = [
-                'payment_amount' => 1000,
+                'payment_amount' => 0.1,
                 'job_type' => 'local',
                 'student_name' => $testData['name'],
                 'email' => $testData['email'],
