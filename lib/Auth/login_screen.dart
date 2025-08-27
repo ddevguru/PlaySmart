@@ -329,10 +329,13 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   }
 
   void _showSuccessAnimation() {
+    if (!mounted) return;
+    
+    final currentContext = context;
     showDialog(
-      context: context,
+      context: currentContext,
       barrierDismissible: false,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return Dialog(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -343,7 +346,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               repeat: false,
               onLoaded: (composition) {
                 Future.delayed(Duration(milliseconds: 1500), () {
-                  if (mounted) Navigator.pop(context);
+                  if (mounted && dialogContext.mounted) {
+                    Navigator.of(dialogContext).pop();
+                  }
                 });
               },
             ),

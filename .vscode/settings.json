@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/Play-smart-new/playsmart/linux"
+    "cmake.sourceDirectory": "C:/Play-smart-new/playsmart/linux",
+    "java.configuration.updateBuildConfiguration": "interactive"
 }

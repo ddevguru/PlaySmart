@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.codify.playsmart"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -32,7 +32,7 @@ android {
         applicationId = "com.codify.playsmart"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 11
+        versionCode = 14
         versionName = flutter.versionName
     }
 

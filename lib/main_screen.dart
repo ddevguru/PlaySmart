@@ -1,28 +1,38 @@
 import 'dart:async';
-import 'dart:math' as math;
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
-
+import 'package:playsmart/Auth/login_screen.dart';
 import 'package:playsmart/Models/contest.dart';
 import 'package:playsmart/Models/job.dart';
 import 'package:playsmart/Models/job_application.dart';
+import 'package:playsmart/Models/mega_contest.dart';
+import 'package:playsmart/Models/question.dart';
+import 'package:playsmart/local_jobs_screen.dart';
+import 'package:playsmart/controller/featured_content_controller.dart';
+import 'package:playsmart/controller/job_application_controller.dart';
+import 'package:playsmart/controller/job_controller.dart';
 import 'package:playsmart/controller/mega-contest-controller.dart';
 import 'package:playsmart/controller/mini-contest-controller.dart';
-import 'package:playsmart/controller/job_controller.dart';
-import 'package:playsmart/controller/job_application_controller.dart';
+import 'package:playsmart/mega_quiz_screen.dart';
+import 'package:playsmart/mega_result_screen.dart';
+import 'package:playsmart/mega_score_service.dart';
 import 'package:playsmart/profile_Screen.dart';
+import 'package:playsmart/quiz_screen.dart';
+import 'package:playsmart/score_service.dart';
 import 'package:playsmart/splash_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'quiz_screen.dart';
-import 'mega_quiz_screen.dart';
-import 'mega_result_screen.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+
+
 
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
@@ -31,18 +41,20 @@ class MainScreen extends StatefulWidget {
   _MainScreenState createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
+class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _animationController;
   late AnimationController _floatingIconsController;
   late AnimationController _pulseController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   late ScrollController _jobApplicationsScrollController;
-  late Timer _autoScrollTimer;
+  Timer? _autoScrollTimer; // Make nullable
   double userBalance = 0.0;
   List<Contest> miniContests = [];
   List<Contest> megaContests = [];
   List<Job> jobs = [];
+  List<Job> higherPackageJobs = [];
+  List<Job> localJobs = [];
   List<JobApplication> jobApplications = [];
   Map<int, String> userJobApplications = {}; // Track user's job applications
   Job? _currentJobApplication; // Track current job being applied for
@@ -55,6 +67,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   // File paths for job application
   String? _selectedPhotoPath;
   String? _selectedResumePath;
+  bool _showReferralField = false;
 
   final List<List<Color>> cardGradients = [
     [Color(0xFFFF4E50), Color(0xFFF9D423)],
@@ -70,15 +83,367 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    
+    // Initialize Razorpay
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    
+    // Initialize animations
+    _animationController = AnimationController(
+      duration: Duration(seconds: 2),
+      vsync: this,
+    );
+    
+    _floatingIconsController = AnimationController(
+      duration: Duration(seconds: 3),
+      vsync: this,
+    );
+    
+    _pulseController = AnimationController(
+      duration: Duration(seconds: 1),
+      vsync: this,
+    );
+    
     _jobApplicationsScrollController = ScrollController();
-    _initializeAnimations();
-    _initializeRazorpay();
+    
+    // Initialize fade animation
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+    
+    // Initialize slide animation
+    _slideAnimation = Tween<Offset>(
+      begin: Offset(0, 0.5),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOut,
+    ));
+    
+    // Start animations
+    _animationController.repeat();
+    _floatingIconsController.repeat();
+    _pulseController.repeat();
+    
+    // Check login status first before initializing data
+    _checkLoginStatusAndInitialize();
+    
+    // Set up periodic token validation (much less frequent to avoid logout issues)
+    Timer.periodic(Duration(minutes: 30), (timer) {
+      validateAndRefreshToken();
+    });
+    
+    // Set up periodic last activity update (much less frequent)
+    Timer.periodic(Duration(minutes: 15), (timer) {
+      updateLastActivity();
+    });
+    
+    // Add app lifecycle listener for session tracking
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    _floatingIconsController.dispose();
+    _pulseController.dispose();
+    _jobApplicationsScrollController.dispose();
+    _autoScrollTimer?.cancel(); // Safe cancel
+    _autoScrollTimer = null; // Set to null
+    _refreshTimer?.cancel();
+    _razorpay.clear();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        print('🔐 DEBUG: App resumed - checking session status...');
+        _checkSessionStatus();
+        
+        // CRITICAL FIX: Recover session if needed
+        _recoverSessionIfNeeded();
+        break;
+      case AppLifecycleState.paused:
+        print('🔐 DEBUG: App paused - updating last activity...');
+        updateLastActivity();
+        break;
+      case AppLifecycleState.inactive:
+        print('🔐 DEBUG: App inactive');
+        break;
+      case AppLifecycleState.detached:
+        print('🔐 DEBUG: App detached');
+        break;
+      case AppLifecycleState.hidden:
+        print('🔐 DEBUG: App hidden');
+        break;
+    }
+  }
+
+  // CRITICAL FIX: Session recovery method
+  Future<void> _recoverSessionIfNeeded() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+      
+      print('🔐 DEBUG: === SESSION RECOVERY CHECK ===');
+      print('🔐 DEBUG: Token exists: ${token != null}');
+      print('🔐 DEBUG: isLoggedIn flag: $isLoggedIn');
+      
+      // If we have a token but isLoggedIn is false, recover the session
+      if (token != null && !isLoggedIn) {
+        print('🔐 DEBUG: 🔄 Session recovery needed! Token exists but isLoggedIn is false');
+        await prefs.setBool('isLoggedIn', true);
+        print('🔐 DEBUG: ✅ Session recovered! isLoggedIn set to true');
+        
+        // CRITICAL: Backup session data after recovery
+        await _backupSessionData(token);
+        print('🔐 DEBUG: ✅ Session data backed up after recovery');
+        
+        // Also ensure we're on the main screen, not login screen
+        if (mounted) {
+          print('🔐 DEBUG: 🔄 Ensuring user stays on main screen...');
+          // Force refresh the current screen to ensure proper state
+          setState(() {});
+        }
+      } else if (token != null && isLoggedIn) {
+        print('🔐 DEBUG: ✅ Session is healthy, no recovery needed');
+        
+        // Still backup session data to be safe
+        await _backupSessionData(token);
+        print('🔐 DEBUG: ✅ Session data backed up for healthy session');
+      } else {
+        print('🔐 DEBUG: ❌ No token found, cannot recover session');
+      }
+      
+      print('🔐 DEBUG: === SESSION RECOVERY END ===');
+    } catch (e) {
+      print('🔐 DEBUG: ❌ Error during session recovery: $e');
+    }
+  }
+
+  Future<void> _checkLoginStatusAndInitialize() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+      
+      // Enhanced debugging
+      print('🔐 === SESSION DEBUG START ===');
+      print('🔐 DEBUG: Checking login status...');
+      print('🔐 DEBUG: Token exists: ${token != null}');
+      print('🔐 DEBUG: Token value: ${token?.substring(0, token.length > 20 ? 20 : token.length)}...');
+      print('🔐 DEBUG: isLoggedIn flag: $isLoggedIn');
+      print('🔐 DEBUG: All SharedPreferences keys: ${prefs.getKeys()}');
+      
+      // Check all stored values for debugging
+      final allKeys = prefs.getKeys();
+      for (String key in allKeys) {
+        if (key.contains('token') || key.contains('login') || key.contains('user')) {
+          final value = prefs.get(key);
+          print('🔐 DEBUG: Key "$key" = $value');
+        }
+      }
+      
+      // BULLETPROOF FIX: Ultra-lenient session check - ANY token means logged in
+      if (token != null && token.isNotEmpty) {
+        print('🔐 DEBUG: ✅ Token found, user is logged in!');
+        
+        // CRITICAL: Force set login flag to true immediately
+        await prefs.setBool('isLoggedIn', true);
+        print('🔐 DEBUG: ✅ Forced isLoggedIn flag to true');
+        
+        // Also store a backup flag
+        await prefs.setBool('userLoggedIn', true);
+        print('🔐 DEBUG: ✅ Set backup login flag');
+        
+        print('🔐 DEBUG: ✅ User is logged in, initializing app...');
+        
+        // Validate token in background without blocking UI
+        _validateTokenInBackground(token);
+        
+        // Initialize data immediately for better UX
+        _initializeData();
+        
+        print('🔐 DEBUG: ✅ App initialized for logged-in user');
+      } else {
+        print('🔐 DEBUG: ❌ No valid token found, checking backup flags...');
+        
+        // Check backup flags before giving up
+        final backupLogin = prefs.getBool('userLoggedIn') ?? false;
+        final anyLoginFlag = prefs.getBool('isLoggedIn') ?? false;
+        
+        if (backupLogin || anyLoginFlag) {
+          print('🔐 DEBUG: 🔄 Backup login flags found, recovering session...');
+          await prefs.setBool('isLoggedIn', true);
+          await prefs.setBool('userLoggedIn', true);
+          
+          // Try to get token from other sources
+          final rememberedToken = prefs.getString('rememberedToken') ?? 
+                                 prefs.getString('authToken') ?? 
+                                 prefs.getString('userToken');
+          
+          if (rememberedToken != null && rememberedToken.isNotEmpty) {
+            print('🔐 DEBUG: ✅ Found remembered token, restoring session...');
+            await prefs.setString('token', rememberedToken);
+            _validateTokenInBackground(rememberedToken);
+            _initializeData();
+            print('🔐 DEBUG: ✅ Session restored from backup!');
+            return; // Don't redirect to login
+          }
+        }
+        
+        print('🔐 DEBUG: ❌ No valid session found, redirecting to login...');
+        
+        // Small delay to ensure UI is ready
+        Future.delayed(Duration(milliseconds: 500), () {
+          _redirectToLogin();
+        });
+      }
+      print('🔐 === SESSION DEBUG END ===');
+    } catch (e) {
+      print('🔐 DEBUG: ❌ Error checking login status: $e');
+      print('🔐 DEBUG: Stack trace: ${StackTrace.current}');
+      
+      // CRITICAL FIX: On error, try to recover session
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('token');
+        if (token != null) {
+          print('🔐 DEBUG: 🔄 Error occurred but token exists, trying to recover...');
+          await prefs.setBool('isLoggedIn', true);
+          _initializeData();
+          print('🔐 DEBUG: ✅ Session recovered after error');
+        } else {
+          print('🔐 DEBUG: ❌ No token to recover, redirecting to login...');
+          _redirectToLogin();
+        }
+      } catch (e2) {
+        print('🔐 DEBUG: ❌ Failed to recover session: $e2');
+        _redirectToLogin();
+      }
+    }
+  }
+  
+  Future<void> _validateTokenInBackground(String token) async {
+    try {
+      print('🔐 DEBUG: Starting background token validation...');
+      
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/simple_session_manager.php?action=validate_token'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'token': token},
+      ).timeout(const Duration(seconds: 10));
+
+      print('🔐 DEBUG: Token validation response: ${response.statusCode}');
+      print('🔐 DEBUG: Token validation body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          print('🔐 DEBUG: ✅ Token validation successful in background');
+          // Update last activity
+          await updateLastActivity();
+          
+          // BULLETPROOF FIX: Ensure login flag is still set
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('isLoggedIn', true);
+          print('🔐 DEBUG: ✅ Confirmed isLoggedIn flag is set to true');
+          
+          // Also ensure token is still there
+          final currentToken = prefs.getString('token');
+          if (currentToken == null) {
+            print('🔐 DEBUG: ⚠️ Token was cleared! Restoring it...');
+            await prefs.setString('token', token);
+            print('🔐 DEBUG: ✅ Token restored');
+          }
+          
+          // CRITICAL: Backup session data every time
+          await _backupSessionData(token);
+          print('🔐 DEBUG: ✅ Session data backed up during validation');
+        } else {
+          print('🔐 DEBUG: ❌ Token validation failed in background: ${data['message']}');
+          // BULLETPROOF FIX: Don't force logout, let user continue
+          // But ensure login flag is maintained
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('isLoggedIn', true);
+          print('🔐 DEBUG: 🔄 Maintaining isLoggedIn flag despite validation failure');
+          
+          // Also ensure token is maintained
+          final currentToken = prefs.getString('token');
+          if (currentToken == null) {
+            print('🔐 DEBUG: ⚠️ Token was cleared! Restoring it...');
+            await prefs.setString('token', token);
+            print('🔐 DEBUG: ✅ Token restored');
+          }
+          
+          // CRITICAL: Backup session data every time
+          await _backupSessionData(token);
+          print('🔐 DEBUG: ✅ Session data backed up despite validation failure');
+        }
+      } else {
+        print('🔐 DEBUG: ❌ Token validation HTTP error: ${response.statusCode}');
+        // BULLETPROOF FIX: Maintain login flag even on HTTP errors
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isLoggedIn', true);
+        print('🔐 DEBUG: 🔄 Maintaining isLoggedIn flag despite HTTP error');
+        
+        // Also ensure token is maintained
+        final currentToken = prefs.getString('token');
+        if (currentToken == null) {
+          print('🔐 DEBUG: ⚠️ Token was cleared! Restoring it...');
+          await prefs.setString('token', token);
+          print('🔐 DEBUG: ✅ Token restored');
+        }
+        
+        // CRITICAL: Backup session data every time
+        await _backupSessionData(token);
+        print('🔐 DEBUG: ✅ Session data backed up despite HTTP error');
+      }
+    } catch (e) {
+      print('🔐 DEBUG: ❌ Error validating token in background: $e');
+              // BULLETPROOF FIX: Don't force logout on network errors
+        // Maintain login flag and token
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('isLoggedIn', true);
+          print('🔐 DEBUG: 🔄 Maintaining isLoggedIn flag despite network error');
+          
+          // Also ensure token is maintained
+          final currentToken = prefs.getString('token');
+          if (currentToken == null) {
+            print('🔐 DEBUG: ⚠️ Token was cleared! Restoring it...');
+            await prefs.setString('token', token);
+            print('🔐 DEBUG: ✅ Token restored');
+          }
+          
+          // CRITICAL: Backup session data every time
+          await _backupSessionData(token);
+          print('🔐 DEBUG: ✅ Session data backed up despite network error');
+        } catch (e2) {
+          print('🔐 DEBUG: ❌ Failed to maintain login flag: $e2');
+        }
+    }
+  }
+
+  void _initializeData() {
     fetchUserBalance();
     fetchContests();
     fetchJobApplications();
     fetchJobs();
     _startRefreshTimer();
-    _startAutoScroll();
+    _startAutoScroll(); // This will now be safe
     
     // Add sample job applications for testing
     userJobApplications[1] = 'pending';
@@ -96,12 +461,12 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         district: 'Mumbai',
         package: '12LPA',
         profile: 'Product Manager',
-        photoPath: 'uploads/photos/rahul_sharma.jpg',
-        resumePath: 'uploads/resumes/rahul_sharma_resume.pdf',
+        photoPath: 'https://playsmart.co.in/uploads/photos/rahul_sharma.jpg',
+        resumePath: 'https://playsmart.co.in/uploads/resumes/rahul_sharma_resume.pdf',
         email: 'rahul.sharma@email.com',
         phone: '+91-9876543210',
         experience: '5 years',
-        skills: 'Product Management, Analytics, Leadership',
+        skills: 'Product Management, Analytics, Leadership, Team Management, Agile, Scrum',
         paymentId: 'pay_123456789',
         applicationStatus: 'shortlisted',
         appliedDate: DateTime.now().subtract(Duration(days: 2)),
@@ -116,12 +481,12 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         district: 'Pune',
         package: '12LPA',
         profile: 'UI Designer',
-        photoPath: 'uploads/photos/priya_patel.jpg',
-        resumePath: 'uploads/resumes/priya_patel_resume.pdf',
+        photoPath: 'https://playsmart.co.in/uploads/photos/priya_patel.jpg',
+        resumePath: 'https://playsmart.co.in/uploads/resumes/priya_patel_resume.pdf',
         email: 'priya.patel@email.com',
         phone: '+91-9876543211',
         experience: '4 years',
-        skills: 'Product Strategy, User Research, Data Analysis',
+        skills: 'Product Strategy, User Research, Data Analysis, Figma, Prototyping, User Testing',
         paymentId: 'pay_123456790',
         applicationStatus: 'pending',
         appliedDate: DateTime.now().subtract(Duration(days: 1)),
@@ -136,15 +501,55 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         district: 'Delhi',
         package: '15LPA',
         profile: 'Software Engineer',
-        photoPath: 'uploads/photos/amit_kumar.jpg',
-        resumePath: 'uploads/resumes/amit_kumar_resume.pdf',
+        photoPath: 'https://playsmart.co.in/uploads/photos/amit_kumar.jpg',
+        resumePath: 'https://playsmart.co.in/uploads/resumes/amit_kumar_resume.pdf',
         email: 'amit.kumar@email.com',
         phone: '+91-9876543212',
         experience: '6 years',
-        skills: 'UI/UX Design, Figma, Prototyping',
+        skills: 'UI/UX Design, Figma, Prototyping, Adobe Creative Suite, User Research, Design Systems',
         paymentId: 'pay_123456791',
         applicationStatus: 'accepted',
         appliedDate: DateTime.now().subtract(Duration(days: 3)),
+        isActive: true,
+      ),
+      JobApplication(
+        id: 4,
+        jobId: 4,
+        companyName: 'Amazon',
+        companyLogoUrl: 'https://playsmart.co.in/uploads/amazon_logo.png',
+        studentName: 'Neha Singh',
+        district: 'Bangalore',
+        package: '18LPA',
+        profile: 'Data Scientist',
+        photoPath: 'https://playsmart.co.in/uploads/photos/neha_singh.jpg',
+        resumePath: 'https://playsmart.co.in/uploads/resumes/neha_singh_resume.pdf',
+        email: 'neha.singh@email.com',
+        phone: '+91-9876543213',
+        experience: '7 years',
+        skills: 'Python, Machine Learning, SQL, TensorFlow, PyTorch, Data Analysis, Statistics',
+        paymentId: 'pay_123456792',
+        applicationStatus: 'shortlisted',
+        appliedDate: DateTime.now().subtract(Duration(days: 4)),
+        isActive: true,
+      ),
+      JobApplication(
+        id: 5,
+        jobId: 5,
+        companyName: 'Netflix',
+        companyLogoUrl: 'https://playsmart.co.in/uploads/netflix_logo.png',
+        studentName: 'Vikram Verma',
+        district: 'Hyderabad',
+        package: '16LPA',
+        profile: 'Frontend Developer',
+        photoPath: 'https://playsmart.co.in/uploads/photos/vikram_verma.jpg',
+        resumePath: 'https://playsmart.co.in/uploads/resumes/vikram_verma_resume.pdf',
+        email: 'vikram.verma@email.com',
+        phone: '+91-9876543214',
+        experience: '5 years',
+        skills: 'React, JavaScript, CSS, TypeScript, Node.js, Git, Responsive Design',
+        paymentId: 'pay_123456793',
+        applicationStatus: 'pending',
+        appliedDate: DateTime.now().subtract(Duration(days: 5)),
         isActive: true,
       ),
     ];
@@ -154,36 +559,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
   }
 
-  void _initializeAnimations() {
-    _animationController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1200),
-    );
-    _floatingIconsController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 8000),
-    )..repeat();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Interval(0.0, 0.65, curve: Curves.easeOut),
-      ),
-    );
-    _slideAnimation = Tween<Offset>(
-      begin: Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Interval(0.3, 1.0, curve: Curves.easeOutCubic),
-      ),
-    );
-    _animationController.forward();
-  }
+
 
   void _initializeRazorpay() {
     _razorpay = Razorpay();
@@ -214,6 +590,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           _selectedResumePath!,
         );
       }
+      
+      // Send payment confirmation email
+      _sendPaymentConfirmationEmail(_currentJobApplication!, response.paymentId ?? '');
     }
     
     print('Payment ID: ${response.paymentId}');
@@ -245,6 +624,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     final TextEditingController phoneController = TextEditingController();
     final TextEditingController experienceController = TextEditingController();
     final TextEditingController skillsController = TextEditingController();
+    final TextEditingController referralCodeController = TextEditingController();
     
     // Reset file paths for new application
     _selectedPhotoPath = null;
@@ -280,55 +660,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      'Apply for ${job.jobTitle}',
-                      style: GoogleFonts.poppins(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    SizedBox(height: 20),
-                    
-                    // Job Details Card
-                    Container(
-                      padding: EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'Company: ${job.companyName}',
-                            style: GoogleFonts.poppins(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Package: ${job.package}',
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              color: Colors.white70,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Location: ${job.location}',
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              color: Colors.white70,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    
+                    // Text(
+                    //   'Apply for ${job.jobTitle}',
+                    //   style: GoogleFonts.poppins(
+                    //     fontSize: 22,
+                    //     fontWeight: FontWeight.bold,
+                    //     color: Colors.white,
+                    //   ),
+                    //   textAlign: TextAlign.center,
+                    // ),
+                    // SizedBox(height: 20),
+                   
                     // Application Form
                     Container(
                       padding: EdgeInsets.all(16),
@@ -445,7 +787,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                            TextFormField(
                              controller: skillsController,
                              style: GoogleFonts.poppins(color: Colors.white),
-                             maxLines: 3,
+                             maxLines: 1,
                              decoration: InputDecoration(
                                labelText: 'Skills & Technologies',
                                labelStyle: GoogleFonts.poppins(color: Colors.white70),
@@ -463,6 +805,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                ),
                              ),
                            ),
+                           SizedBox(height: 12),
+                           
+                           // Referral Code removed from main form - will be added in payment instructions
                            SizedBox(height: 12),
                            
                            // Photo Upload
@@ -655,33 +1000,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                       ),
                     ),
                     SizedBox(height: 20),
-                    
-                    // Fee Display
-                    Container(
-                      padding: EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.yellow.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.yellow.withOpacity(0.5)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.payment, color: Colors.yellow, size: 24),
-                          SizedBox(width: 8),
-                          Text(
-                            'Application Fee: ₹1000',
-                            style: GoogleFonts.poppins(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.yellow,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    
+                   
                     // Action Buttons
                     Row(
                       children: [
@@ -744,8 +1063,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                 return;
                               }
                               
-                              Navigator.of(context).pop();
-                              _initiatePayment(job);
+                              // Submit the form data first
+                              final formData = {
+                                'name': nameController.text,
+                                'email': emailController.text,
+                                'phone': phoneController.text,
+                                'experience': experienceController.text,
+                                'skills': skillsController.text,
+                              };
+                              _submitJobApplication(job, referralCodeController.text, formData, _selectedPhotoPath, _selectedResumePath);
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
@@ -756,7 +1082,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                               ),
                             ),
                             child: Text(
-                              'Pay & Apply',
+                              'Submit',
                               style: GoogleFonts.poppins(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
@@ -801,6 +1127,48 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  Future<void> _sendPaymentConfirmationEmail(Job job, String paymentId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      
+      if (token == null) {
+        print('DEBUG: No token found for sending email');
+        return;
+      }
+
+      // Send email via backend
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/send_payment_confirmation_email.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'job_id': job.id,
+          'job_title': job.jobTitle,
+          'company_name': job.companyName,
+          'package': job.package,
+          'payment_id': paymentId,
+          'email': 'user@example.com', // This should come from user data
+        }),
+      ).timeout(Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        if (result['success']) {
+          print('DEBUG: Payment confirmation email sent successfully');
+        } else {
+          print('DEBUG: Failed to send email: ${result['message']}');
+        }
+      } else {
+        print('DEBUG: Email API error: HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      print('DEBUG: Error sending payment confirmation email: $e');
     }
   }
 
@@ -862,19 +1230,136 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
   }
 
-  @override
-  void dispose() {
-    _animationController.dispose();
-    _floatingIconsController.dispose();
-    _pulseController.dispose();
-    _jobApplicationsScrollController.dispose();
-    _autoScrollTimer?.cancel();
-    _refreshTimer?.cancel();
-    _razorpay.clear();
-    super.dispose();
+
+
+
+
+    Future<void> _logout() async {
+    try {
+      print('🔐 DEBUG: Starting logout process...');
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      
+      print('🔐 DEBUG: Current session before logout:');
+      print('🔐 DEBUG: Token exists: ${token != null}');
+      print('🔐 DEBUG: isLoggedIn: ${prefs.getBool('isLoggedIn')}');
+      
+      if (token != null) {
+        // Try to call logout API (but don't block on it)
+        try {
+          await http.post(
+            Uri.parse('https://playsmart.co.in/logout.php'),
+            body: {'token': token},
+          ).timeout(const Duration(seconds: 5));
+          print('🔐 DEBUG: ✅ Logout API call successful');
+        } catch (e) {
+          print('🔐 DEBUG: ❌ Logout API call failed: $e');
+        }
+      }
+      
+      // Clear all stored data
+      await prefs.clear();
+      
+      print('🔐 DEBUG: ✅ User logged out successfully, all data cleared');
+      
+      // Navigate to login screen
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) => LoginScreen(),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              var begin = Offset(0.0, 1.0);
+              var end = Offset.zero;
+              var curve = Curves.easeInOutQuart;
+              var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+              return SlideTransition(position: animation.drive(tween), child: child);
+            },
+            transitionDuration: Duration(milliseconds: 700),
+          ),
+        );
+      }
+    } catch (e) {
+      print('🔐 DEBUG: ❌ Error during logout: $e');
+      // Force logout even if there's an error
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+        print('🔐 DEBUG: 🔄 Forced logout due to error');
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) => LoginScreen(),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                var begin = Offset(0.0, 1.0);
+                var end = Offset.zero;
+                var curve = Curves.easeInOutQuart;
+                var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                return SlideTransition(position: animation.drive(tween), child: child);
+            },
+              transitionDuration: Duration(milliseconds: 700),
+            ),
+          );
+        }
+      } catch (e2) {
+        print('🔐 DEBUG: ❌ Critical error during logout: $e2');
+      }
+    }
   }
 
+  // Add session status check method for debugging
+  Future<void> _checkSessionStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+      final userLoggedIn = prefs.getBool('userLoggedIn') ?? false;
+      
+      print('🔐 === SESSION STATUS CHECK ===');
+      print('🔐 DEBUG: Current session status:');
+      print('🔐 DEBUG: Token exists: ${token != null}');
+      print('🔐 DEBUG: Token length: ${token?.length ?? 0}');
+      print('🔐 DEBUG: Token preview: ${token?.substring(0, token != null && token.length > 20 ? 20 : token.length)}...');
+      print('🔐 DEBUG: isLoggedIn flag: $isLoggedIn');
+      print('🔐 DEBUG: userLoggedIn flag: $userLoggedIn');
+      print('🔐 DEBUG: All stored keys: ${prefs.getKeys()}');
+      
+      // Show all relevant stored values
+      final allKeys = prefs.getKeys();
+      for (String key in allKeys) {
+        if (key.contains('token') || key.contains('login') || key.contains('user') || key.contains('email')) {
+          final value = prefs.get(key);
+          print('🔐 DEBUG: Key "$key" = $value');
+        }
+      }
+      
+      print('🔐 === SESSION STATUS END ===');
+    } catch (e) {
+      print('🔐 DEBUG: ❌ Error checking session status: $e');
+    }
+  }
 
+  // BULLETPROOF FIX: Backup session data method
+  Future<void> _backupSessionData(String token) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Store multiple backup copies
+      await prefs.setString('rememberedToken', token);
+      await prefs.setString('authToken', token);
+      await prefs.setString('userToken', token);
+      await prefs.setBool('userLoggedIn', true);
+      await prefs.setBool('isLoggedIn', true);
+      await prefs.setBool('sessionActive', true);
+      await prefs.setBool('userAuthenticated', true);
+      
+      print('🔐 DEBUG: ✅ Session data backed up with multiple flags');
+      print('🔐 DEBUG: Backup flags set: rememberedToken, authToken, userToken, userLoggedIn, isLoggedIn, sessionActive, userAuthenticated');
+    } catch (e) {
+      print('🔐 DEBUG: ❌ Error backing up session data: $e');
+    }
+  }
 
   Future<void> _redirectToLogin() async {
     print('Redirecting to login...');
@@ -898,20 +1383,66 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
     try {
       final response = await http.post(
-        Uri.parse('https://playsmart.co.in/update_last_activity.php'),
+        Uri.parse('https://playsmart.co.in/simple_session_manager.php?action=update_activity'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: {'session_token': token},
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(const Duration(seconds: 10));
+      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        if (!data['success']) {
+        if (data['success']) {
+          print('Last activity updated successfully');
+        } else {
           print('Failed to update last activity: ${data['message']}');
+          // Don't redirect, just log the issue
         }
       } else {
         print('Failed to update last activity: HTTP ${response.statusCode}, Body: ${response.body}');
+        // Don't redirect, just log the issue
       }
     } catch (e) {
       print('Error updating last activity: $e');
+      // Don't redirect on network errors, just log
+    }
+  }
+
+  Future<void> validateAndRefreshToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    
+    if (token == null) {
+      // Only redirect if no token at all, not on validation failure
+      print('No token found, user needs to login');
+      return;
+    }
+    
+    try {
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/simple_session_manager.php?action=validate_token'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'token': token},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['data'] is Map<String, dynamic>) {
+          // Token is valid, update last activity
+          await updateLastActivity();
+          print('Token validation successful');
+        } else {
+          // Token is invalid, but don't force logout - just log it
+          print('Token validation failed: ${data['message']}');
+          // Don't redirect, let user continue using the app
+        }
+      } else {
+        // API error, but don't force logout
+        print('Token validation API error: ${response.statusCode}');
+        // Don't redirect, let user continue using the app
+      }
+    } catch (e) {
+      print('Error checking token validity: $e');
+      // Network error, don't redirect immediately, just log
+      // User can continue using the app
     }
   }
 
@@ -961,7 +1492,13 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       print('DEBUG: Starting to fetch job applications...');
       print('DEBUG: API URL: ${JobApplicationController.baseUrl}/fetch_job_applications.php');
       
-      final applicationsData = await JobApplicationController.fetchJobApplications();
+      // Add loading timeout
+      final applicationsData = await JobApplicationController.fetchJobApplications()
+          .timeout(Duration(seconds: 5), onTimeout: () {
+        print('DEBUG: Job applications fetch timed out after 5 seconds');
+        throw TimeoutException('Job applications fetch timed out', Duration(seconds: 5));
+      });
+      
       print('DEBUG: Received ${applicationsData.length} applications from API');
       
       if (mounted) {
@@ -969,6 +1506,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           jobApplications = applicationsData;
         });
         print('DEBUG: Updated state with ${jobApplications.length} applications');
+        
+        // Restart auto-scroll after data is loaded
+        _restartAutoScroll();
       }
       print('DEBUG: Fetched ${jobApplications.length} job applications successfully');
     } catch (e) {
@@ -981,6 +1521,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             print('DEBUG: API failed, keeping sample data');
           }
         });
+        
+        // Restart auto-scroll even with sample data
+        _restartAutoScroll();
       }
       // Don't crash the app, just show empty state
     }
@@ -994,6 +1537,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       if (mounted) {
         setState(() {
           jobs = jobsData;
+          // Categorize jobs
+          _categorizeJobs(jobsData);
         });
         print('DEBUG: Updated state with ${jobs.length} jobs');
       }
@@ -1003,9 +1548,35 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       if (mounted) {
         setState(() {
           jobs = [];
+          higherPackageJobs = [];
+          localJobs = [];
         });
       }
     }
+  }
+
+  void _categorizeJobs(List<Job> allJobs) {
+    // Categorize jobs based on package amount and location
+    
+    // Higher Package Jobs (above 12 LPA)
+    higherPackageJobs = allJobs.where((job) {
+      if (job.package == null || job.package.isEmpty) return false;
+      
+      // Extract numeric value from package string (e.g., "25LPA" -> 25)
+      final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+      return packageValue != null && packageValue >= 12;
+    }).toList();
+
+    // Local Jobs (package < 10 LPA)
+    localJobs = allJobs.where((job) {
+      if (job.package == null || job.package.isEmpty) return false;
+      
+      // Extract numeric value from package string (e.g., "8LPA" -> 8)
+      final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+      return packageValue != null && packageValue < 10;
+    }).toList();
+    
+    print('DEBUG: Categorized ${higherPackageJobs.length} higher package jobs and ${localJobs.length} local jobs');
   }
 
   Future<void> fetchContests() async {
@@ -1135,10 +1706,20 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   }
 
   void _startAutoScroll() {
-    _autoScrollTimer?.cancel();
-    _autoScrollTimer = Timer.periodic(Duration(seconds: 3), (timer) {
-      if (!mounted || jobApplications.length <= 3) {
+    _autoScrollTimer?.cancel(); // Cancel existing timer if any
+    
+    // Don't start auto-scroll if there are no job applications
+    if (jobApplications.length <= 1) {
+      print('DEBUG: Not enough job applications for auto-scroll (${jobApplications.length} <= 1)');
+      return;
+    }
+    
+    print('DEBUG: Starting marquee auto-scroll with ${jobApplications.length} applications');
+    _autoScrollTimer = Timer.periodic(Duration(milliseconds: 50), (timer) {
+      if (!mounted || jobApplications.length <= 1) {
+        print('DEBUG: Stopping marquee auto-scroll - mounted: $mounted, apps: ${jobApplications.length}');
         timer.cancel();
+        _autoScrollTimer = null;
         return;
       }
       
@@ -1146,31 +1727,44 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         final maxScroll = _jobApplicationsScrollController.position.maxScrollExtent;
         final currentScroll = _jobApplicationsScrollController.position.pixels;
         
+        // Continuous right-to-left marquee scrolling
         if (currentScroll >= maxScroll) {
-          // Reset to beginning when reaching the end
-          _jobApplicationsScrollController.animateTo(
-            0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
+          // Reset to beginning when reaching the end for seamless loop
+          _jobApplicationsScrollController.jumpTo(0);
         } else {
-          // Scroll to next item
-          _jobApplicationsScrollController.animateTo(
-            currentScroll + 215, // Width of card + margin
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
+          // Smooth continuous scrolling to the left
+          _jobApplicationsScrollController.jumpTo(currentScroll + 1);
         }
+      } else {
+        print('DEBUG: Scroll controller not ready');
+      }
+    });
+  }
+
+  void _restartAutoScroll() {
+    print('DEBUG: Restarting marquee auto-scroll');
+    // Restart auto-scroll when data is loaded
+    Future.delayed(Duration(milliseconds: 500), () {
+      if (mounted && jobApplications.length > 1) {
+        print('DEBUG: Restarting marquee auto-scroll after delay');
+        _startAutoScroll();
+      } else {
+        print('DEBUG: Not restarting marquee auto-scroll - mounted: $mounted, apps: ${jobApplications.length}');
       }
     });
   }
 
   void _pauseAutoScroll() {
+    print('DEBUG: Pausing marquee auto-scroll');
     _autoScrollTimer?.cancel();
+    _autoScrollTimer = null; // Set to null after canceling
   }
 
   void _resumeAutoScroll() {
-    _startAutoScroll();
+    print('DEBUG: Resuming marquee auto-scroll');
+    if (_autoScrollTimer == null) { // Only start if not already running
+      _startAutoScroll();
+    }
   }
 
   Future<String?> getMatchId(int contestId) async {
@@ -1550,63 +2144,125 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           ),
         ],
       ),
-              child: Padding(
-          padding: EdgeInsets.all(8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Company Name and Logo
-              Row(
-                children: [
-                  Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[200],
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: application.companyLogoUrl.isNotEmpty
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: Image.network(
-                              application.companyLogoUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Icon(
-                                  Icons.business,
+      child: Padding(
+        padding: EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Profile Photo and Company Logo Row
+            Row(
+              children: [
+                // Profile Photo (Circle)
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.grey[300]!, width: 2),
+                  ),
+                  child: application.photoUrl != null && application.photoUrl!.isNotEmpty
+                      ? ClipOval(
+                          child: Image.network(
+                            application.photoUrl!,
+                            fit: BoxFit.cover,
+                            width: 30,
+                            height: 30,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[200],
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.person,
                                   color: Colors.grey[600],
-                                  size: 16,
-                                );
-                              },
-                            ),
-                          )
-                        : Icon(
-                            Icons.business,
-                            color: Colors.grey[600],
-                            size: 16,
+                                  size: 14,
+                                ),
+                              );
+                            },
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[200],
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    value: loadingProgress.expectedTotalBytes != null
+                                        ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                        : null,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              );
+                            },
                           ),
+                        )
+                      : Container(
+                          decoration: BoxDecoration(
+                            color: Colors.grey[200],
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.person,
+                            color: Colors.grey[600],
+                            size: 14,
+                          ),
+                        ),
+                ),
+                SizedBox(width: 4),
+                // Company Logo
+                Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(3),
                   ),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      application.companyName,
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                  child: application.companyLogoUrl.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(3),
+                          child: Image.network(
+                            application.companyLogoUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Icon(
+                                Icons.business,
+                                color: Colors.grey[600],
+                                size: 10,
+                              );
+                            },
+                          ),
+                        )
+                      : Icon(
+                          Icons.business,
+                          color: Colors.grey[600],
+                          size: 10,
+                        ),
+                ),
+                SizedBox(width: 3),
+                // Company Name
+                Expanded(
+                  child: Text(
+                    application.companyName,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
             SizedBox(height: 4),
             // Student Name
             Text(
               application.studentName,
               style: GoogleFonts.poppins(
-                fontSize: 13,
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: Colors.black87,
               ),
@@ -1618,46 +2274,46 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             Text(
               application.district,
               style: GoogleFonts.poppins(
-                fontSize: 10,
+                fontSize: 8,
                 color: Colors.grey[600],
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            SizedBox(height: 4),
+            SizedBox(height: 2),
             // Package
             Row(
               children: [
-                Icon(Icons.currency_rupee, color: Colors.green[600], size: 11),
-                SizedBox(width: 2),
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 9),
+                SizedBox(width: 1),
                 Text(
                   application.package,
                   style: GoogleFonts.poppins(
-                    fontSize: 11,
+                    fontSize: 9,
                     fontWeight: FontWeight.bold,
                     color: Colors.green[600],
                   ),
                 ),
               ],
             ),
-            SizedBox(height: 4),
+            SizedBox(height: 2),
             // Profile
             Text(
               '💼 ${application.profile}',
               style: GoogleFonts.poppins(
-                fontSize: 10,
+                fontSize: 8,
                 color: Colors.grey[600],
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-            ),
-            SizedBox(height: 3),
+              ),
+            SizedBox(height: 2),
             // Application Status
             Container(
-              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              padding: EdgeInsets.symmetric(horizontal: 2, vertical: 1),
               decoration: BoxDecoration(
                 color: _getStatusColor(application.applicationStatus).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(3),
                 border: Border.all(
                   color: _getStatusColor(application.applicationStatus).withOpacity(0.3),
                 ),
@@ -1665,7 +2321,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               child: Text(
                 _getStatusText(application.applicationStatus),
                 style: GoogleFonts.poppins(
-                  fontSize: 8,
+                  fontSize: 6,
                   fontWeight: FontWeight.w600,
                   color: _getStatusColor(application.applicationStatus),
                 ),
@@ -1697,63 +2353,32 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                // Company Logo
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: job.companyLogoUrl.isNotEmpty
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            job.companyLogoUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Icon(
-                                Icons.business,
-                                color: Colors.grey[600],
-                                size: 24,
-                              );
-                            },
-                          ),
-                        )
-                      : Icon(
-                          Icons.business,
-                          color: Colors.grey[600],
-                          size: 24,
-                        ),
-                ),
-                SizedBox(width: 12),
-                // Company Name
-                Expanded(
-                  child: Text(
-                    job.companyName,
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
             // Job Title
             Text(
               job.jobTitle,
               style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
                 color: Colors.black87,
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 8),
+            // Higher Education
+            Row(
+              children: [
+                Icon(Icons.school, color: Colors.blue[600], size: 16),
+                SizedBox(width: 4),
+                Text(
+                  'Higher Education',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blue[600],
+                  ),
+                ),
+              ],
             ),
             SizedBox(height: 8),
             // Package
@@ -1767,24 +2392,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: Colors.green[600],
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 4),
-            // Location
-            Row(
-              children: [
-                Icon(Icons.location_on, color: Colors.grey[600], size: 16),
-                SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    job.location,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -1831,6 +2438,110 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildJobCardWithApplyButton(Job job) {
+    // Determine button color based on package amount (but don't show amount)
+    Color buttonColor;
+    
+    // Extract numeric value from package string (e.g., "25LPA" -> 25)
+    final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+    
+    if (packageValue != null && packageValue >= 20) {
+      // 20+ LPA jobs get orange button
+      buttonColor = Colors.orange;
+    } else {
+      // Lower package jobs get green button
+      buttonColor = Colors.green;
+    }
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Job Title
+            Text(
+              job.jobTitle,
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 8),
+            // Higher Education
+            Row(
+              children: [
+                Icon(Icons.school, color: Colors.blue[600], size: 16),
+                SizedBox(width: 4),
+                Text(
+                  'Higher Education',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blue[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            // Package
+            Row(
+              children: [
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 16),
+                SizedBox(width: 4),
+                Text(
+                  job.package,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            // Apply Button (no payment amount shown)
+            GestureDetector(
+              onTap: () => _showJobApplicationModal(job),
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: buttonColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: buttonColor.withOpacity(0.3)),
+                ),
+                child: Text(
+                  'Apply',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: buttonColor,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1891,8 +2602,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                 builder: (context, child) {
                   return Transform.translate(
                     offset: Offset(
-                      math.sin((_floatingIconsController.value * 2 * math.pi) + index) * 30,
-                      math.cos((_floatingIconsController.value * 2 * math.pi) + index + 1) * 20,
+                              sin((_floatingIconsController.value * 2 * pi) + index) * 30,
+        cos((_floatingIconsController.value * 2 * pi) + index + 1) * 20,
                     ),
                     child: Opacity(
                       opacity: 0.15,
@@ -1919,30 +2630,19 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                           icon: Icons.person,
                           onPressed: () async {
                             HapticFeedback.selectionClick();
-                            SharedPreferences prefs = await SharedPreferences.getInstance();
-                            String? token = prefs.getString('token');
-                            print('Token for profile: $token');
+                            // BULLETPROOF FIX: Check and recover session before showing profile
+                            await _checkSessionStatus();
+                            await _recoverSessionIfNeeded();
+                            
+                            // CRITICAL: Backup session data when profile is accessed
+                            final prefs = await SharedPreferences.getInstance();
+                            final token = prefs.getString('token');
                             if (token != null) {
-                              await updateLastActivity();
-                              Navigator.push(
-                                context,
-                                PageRouteBuilder(
-                                  pageBuilder: (context, animation, secondaryAnimation) => ProfileScreen(token: token),
-                                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                    var begin = Offset(1.0, 0.0);
-                                    var end = Offset.zero;
-                                    var curve = Curves.easeOutQuint;
-                                    var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                                    return SlideTransition(position: animation.drive(tween), child: child);
-                                  },
-                                  transitionDuration: Duration(milliseconds: 500),
-                                ),
-                              ).then((_) {
-                                fetchUserBalance();
-                              });
-                            } else {
-                              await _redirectToLogin();
+                              await _backupSessionData(token);
+                              print('🔐 DEBUG: ✅ Session data backed up when profile accessed');
                             }
+                            
+                            await _showProfileWithLogoutOption();
                           },
                         ),
                       ),
@@ -1967,7 +2667,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                       SizedBox(width: 60), // Balance the layout
                     ],
                   ),
-                  
+                  SizedBox(height: 20),
                   // Scrollable main content
                   Expanded(
                     child: SingleChildScrollView(
@@ -1976,30 +2676,68 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Job Applications Section (First Container)
-                          Text(
-                            'Job Applications',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Our Successfully Placed',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  Text(
+                                    'Candidates',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.yellow,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                          SizedBox(height: 8),
+                          SizedBox(height: 10),
+
                           Container(
-                            height: 150,
+                            height: 140,
                             child: jobApplications.isNotEmpty 
                               ? GestureDetector(
-                                  onPanStart: (_) => _pauseAutoScroll(),
-                                  onPanEnd: (_) => Future.delayed(Duration(seconds: 2), _resumeAutoScroll),
+                                  onPanStart: (_) {
+                                    print('DEBUG: User interaction detected, pausing marquee auto-scroll');
+                                    _pauseAutoScroll();
+                                  },
+                                  onPanEnd: (_) {
+                                    print('DEBUG: User interaction ended, resuming marquee auto-scroll in 2 seconds');
+                                    Future.delayed(Duration(seconds: 2), () {
+                                      if (mounted) {
+                                        print('DEBUG: Resuming marquee auto-scroll after user interaction');
+                                        _resumeAutoScroll();
+                                      }
+                                    });
+                                  },
+                                  onTap: () {
+                                    // Pause auto-scroll on tap and resume after delay
+                                    _pauseAutoScroll();
+                                    Future.delayed(Duration(seconds: 2), () {
+                                      if (mounted) {
+                                        _resumeAutoScroll();
+                                      }
+                                    });
+                                  },
                                   child: ListView.builder(
                                     controller: _jobApplicationsScrollController,
                                     scrollDirection: Axis.horizontal,
-                                    physics: BouncingScrollPhysics(),
-                                    itemCount: jobApplications.length > 3 ? 3 : jobApplications.length,
+                                    physics: NeverScrollableScrollPhysics(), // Disable manual scrolling for marquee effect
+                                    itemCount: jobApplications.length * 2, // Duplicate items for seamless loop
                                     itemBuilder: (context, index) {
-                                      final application = jobApplications[index];
+                                      final application = jobApplications[index % jobApplications.length];
                                       return Container(
-                                        width: 200,
+                                        width: 180,
                                         margin: EdgeInsets.only(right: 15),
                                         child: _buildJobApplicationCard(application),
                                       );
@@ -2023,46 +2761,60 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                           fontSize: 14,
                                         ),
                                       ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Debug: ${jobApplications.length} apps loaded',
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.white60,
-                                          fontSize: 10,
-                                        ),
-                                      ),
                                     ],
                                   ),
                                 ),
                           ),
-                        
-                          SizedBox(height: 8),
-                          // Popular Jobs Section
-                          Container(
-                            padding: EdgeInsets.symmetric(vertical: 8),
-                            child: Text(
-                              'Popular Jobs',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
+                          
+                          // View All Button for Successful Candidates (Outside Container)
+                          SizedBox(height: 15),
+                          Center(
+                            child: ElevatedButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => SuccessfulCandidatesScreen(candidates: jobApplications),
+                                  ),
+                                );
+                              },
+                              child: Text('View All Candidates'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
                             ),
                           ),
-                          SizedBox(height: 8),
+                        
+                          SizedBox(height: 20),
+                          
+                          // Higher Package Jobs Section (Horizontal View)
+                          Text(
+                            'Higher Package Jobs',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 12),
                           Container(
                             height: 190,
-                            child: jobs.isNotEmpty 
+                            child: higherPackageJobs.isNotEmpty 
                               ? ListView.builder(
                                   scrollDirection: Axis.horizontal,
                                   physics: BouncingScrollPhysics(),
-                                  itemCount: jobs.length,
+                                  itemCount: higherPackageJobs.length,
                                   itemBuilder: (context, index) {
-                                    final job = jobs[index];
+                                    final job = higherPackageJobs[index];
                                     return Container(
-                                      width: 200,
+                                      width: 180,
                                       margin: EdgeInsets.only(right: 15),
-                                      child: _buildJobCard(job),
+                                      child: _buildJobCardWithApplyButton(job),
                                     );
                                   },
                                 )
@@ -2077,7 +2829,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                       ),
                                       SizedBox(height: 6),
                                       Text(
-                                        'No jobs available',
+                                        'No higher package jobs available',
                                         style: GoogleFonts.poppins(
                                           color: Colors.white70,
                                           fontSize: 14,
@@ -2087,46 +2839,171 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                                   ),
                                 ),
                           ),
-                          SizedBox(height: 12),
-                          // Contests Section
-                          if (megaContests.isNotEmpty) ...[
-                            Text(
-                              'Mega Contests',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            SizedBox(height: 10),
-                            ...megaContests.asMap().entries.map((entry) {
-                              final index = entry.key;
-                              final contest = entry.value;
-                              return _buildContestCard(contest, index, isMega: true);
-                            }),
-                          ],
-                          if (sortedMiniContests.isNotEmpty) ...[
-                            SizedBox(height: 20),
-                            Text(
-                              'Mini Contests',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            SizedBox(height: 10),
-                            ...sortedMiniContests.asMap().entries.map((entry) {
-                              final index = entry.key;
-                              final contest = entry.value;
-                              return _buildContestCard(contest, index, isMega: false);
-                            }),
-                          ],
-                          if (megaContests.isEmpty && sortedMiniContests.isEmpty)
-                            Center(child: CircularProgressIndicator(color: Colors.white)),
                           
-                          // Bottom spacing for scrollable content
-                          SizedBox(height: 30),
+                          // View All Button for Higher Package Jobs (Outside Container)
+                          SizedBox(height: 15),
+                          Center(
+                            child: ElevatedButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => AllJobsPage(
+                                      jobs: higherPackageJobs,
+                                      title: 'Higher Package Jobs',
+                                      jobType: 'higher_package',
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: Text('View All Higher Package Jobs'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          
+                          // Local Jobs Section (Horizontal View)
+                          SizedBox(height: 20),
+                          Text(
+                            'Local Jobs',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 12),
+                          Container(
+                            height: 190,
+                            child: localJobs.isNotEmpty 
+                              ? ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: BouncingScrollPhysics(),
+                                  itemCount: localJobs.length,
+                                  itemBuilder: (context, index) {
+                                    final job = localJobs[index];
+                                    return Container(
+                                      width: 180,
+                                      margin: EdgeInsets.only(right: 15),
+                                      child: _buildJobCardWithApplyButton(job),
+                                    );
+                                  },
+                                )
+                              : Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.business_center_outlined,
+                                        color: Colors.white70,
+                                        size: 28,
+                                      ),
+                                      SizedBox(height: 6),
+                                      Text(
+                                        'No local jobs available',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.white70,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                          ),
+                          
+                          // View All Button for Local Jobs (Outside Container)
+                          SizedBox(height: 15),
+                          Center(
+                            child: ElevatedButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const LocalJobsScreen(),
+                                  ),
+                                );
+                              },
+                              child: Text('View All Local Jobs'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          
+                          // Contests Section
+                          // SizedBox(height: 20),
+                          // Text(
+                          //   'Contests',
+                          //   style: GoogleFonts.poppins(
+                          //     color: Colors.white,
+                          //     fontSize: 20,
+                          //     fontWeight: FontWeight.bold,
+                          //   ),
+                          // ),
+                          // SizedBox(height: 12),
+                          
+                          // // Show first 2 contests
+                          // if (megaContests.isNotEmpty || miniContests.isNotEmpty)
+                          //   Column(
+                          //     children: [
+                          //       if (megaContests.isNotEmpty)
+                          //         _buildContestCard(megaContests.first, 0, isMega: true),
+                          //       if (miniContests.isNotEmpty)
+                          //         _buildContestCard(miniContests.first, 1, isMega: false),
+                          //     ],
+                          //   )
+                          // else
+                          //   Center(
+                          //     child: Column(
+                          //       mainAxisAlignment: MainAxisAlignment.center,
+                          //       children: [
+                          //         Icon(
+                          //           Icons.emoji_events_outlined,
+                          //           color: Colors.white70,
+                          //           size: 28,
+                          //         ),
+                          //         SizedBox(height: 6),
+                          //         Text(
+                          //           'No contests available',
+                          //           style: GoogleFonts.poppins(
+                          //             color: Colors.white70,
+                          //             fontSize: 14,
+                          //           ),
+                          //         ),
+                          //       ],
+                          //     ),
+                          //   ),
+                          
+                          // // View All Button for Contests (Outside Container)
+                          // SizedBox(height: 15),
+                          // Center(
+                          //   child: ElevatedButton(
+                          //     onPressed: () => _showAllContests(),
+                          //     child: Text('View All Contests'),
+                          //     style: ElevatedButton.styleFrom(
+                          //       backgroundColor: Colors.blue,
+                          //       foregroundColor: Colors.white,
+                          //       padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          //       shape: RoundedRectangleBorder(
+                          //         borderRadius: BorderRadius.circular(8),
+                          //       ),
+                          //     ),
+                          //   ),
+                          // ),
+                        
+                        
+                        
                         ],
                       ),
                     ),
@@ -2730,5 +3607,2111 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _showProfileWithLogoutOption() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('token');
+    final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+    
+    if (token == null || !isLoggedIn) {
+      await _redirectToLogin();
+      return;
+    }
 
+    try {
+      // Try to fetch user data first to check if token is valid
+      final response = await http.get(
+        Uri.parse('https://playsmart.co.in/get_user_data.php?token=$token'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'QuizMaster/1.0',
+        },
+      ).timeout(Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['data'] is Map<String, dynamic>) {
+          // Token is valid, proceed to profile
+          await updateLastActivity();
+          Navigator.push(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) => ProfileScreen(token: token!),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                var begin = Offset(1.0, 0.0);
+                var end = Offset.zero;
+                var curve = Curves.easeOutQuint;
+                var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                return SlideTransition(position: animation.drive(tween), child: child);
+              },
+              transitionDuration: Duration(milliseconds: 500),
+            ),
+          ).then((_) {
+            fetchUserBalance();
+          });
+        } else {
+          // Token is invalid, show logout option
+          _showTokenExpiredDialog();
+        }
+      } else {
+        // API error, show logout option
+        _showTokenExpiredDialog();
+      }
+    } catch (e) {
+      print('Error checking token validity: $e');
+      // Network error, show logout option
+      _showTokenExpiredDialog();
+    }
+  }
+
+  void _showCandidateDetails(JobApplication application) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header with Profile Photo and Name
+                    Row(
+                      children: [
+                        // Large Profile Photo
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                          ),
+                          child: application.photoUrl != null && application.photoUrl!.isNotEmpty
+                              ? ClipOval(
+                                  child: Image.network(
+                                    application.photoUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          Icons.person,
+                                          color: Colors.white,
+                                          size: 40,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                )
+                              : Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.person,
+                                    color: Colors.white,
+                                    size: 40,
+                                  ),
+                                ),
+                        ),
+                        SizedBox(width: 16),
+                        // Name and Company
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                application.studentName,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                application.companyName,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 24),
+                    
+                    // Job Details Section
+                    _buildDetailSection(
+                      'Job Details',
+                      [
+                        _buildDetailRow('Position', application.profile),
+                        _buildDetailRow('Package', '₹${application.package}'),
+                        _buildDetailRow('Location', application.district),
+                        _buildDetailRow('Experience', application.experience),
+                      ],
+                    ),
+                    SizedBox(height: 16),
+                    
+                    // Skills Section
+                    if (application.skills.isNotEmpty)
+                      _buildDetailSection(
+                        'Skills & Technologies',
+                        [
+                          _buildDetailRow('Skills', application.skills),
+                        ],
+                      ),
+                    SizedBox(height: 16),
+                    
+                    // Application Status Section
+                    _buildDetailSection(
+                      'Application Status',
+                      [
+                        _buildDetailRow('Status', _getStatusText(application.applicationStatus)),
+                        _buildDetailRow('Applied Date', _formatDate(application.appliedDate)),
+                      ],
+                    ),
+                    
+                    SizedBox(height: 24),
+                    
+                    // Close Button
+                    Center(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Color(0xFF6A11CB),
+                          padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          'Close',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailSection(String title, List<Widget> children) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: GoogleFonts.poppins(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              '$label:',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  void _showTokenExpiredDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: Text(
+            'Session Expired',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Text(
+            'Your session has expired or there was an error loading your profile. Please log in again.',
+            style: GoogleFonts.poppins(
+              color: Colors.white70,
+              fontSize: 14,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _redirectToLogin();
+              },
+              child: Text(
+                'Logout & Login',
+                style: GoogleFonts.poppins(
+                  color: Colors.orange,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showInstructionsModal(Job job, String referralCode) {
+    String instructions = '';
+    String amountText = '';
+    double amount = 0.0;
+    final TextEditingController referralCodeController = TextEditingController();
+
+    if (job.package.contains('LPA') && 
+        double.parse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim()) >= 8) {
+      instructions = '''
+1. Play Smart services only works in company job requirements.
+
+2. Play Smart services working  All Over India.
+
+3. We provide Job for  candidates on local Place  or  elsewhere
+
+4. We provide job opportunities for candidates according to their education.
+
+5. We provide  2 to 3 Interview calls within Month for candidates.
+
+6. We provide you  job opportunities That means we provide you a Service  The registration fee for    them is 2000.
+
+7. Rs. 2000 Registration charges Will be limited for one year.
+
+  8. The fee of Rs. 2000 is non-refundable.
+
+9. If all the above are acceptable then  register today. The company will contact you today for a job    according to your education and provide you with further information.
+
+10. The fee of Rs. 2000 is non-refundable.
+
+11. The fee of Rs. 2000 is non-refundable.
+
+12. The fee of Rs. 2000 is non-refundable.
+      ''';
+      amountText = '₹2000';
+      amount = 2000.0;
+    } else {
+      instructions = '''
+1. Play Smart services only works in company job requirements.
+
+2. Play Smart services working  All Over India.
+
+3. We provide Job for  candidates on local Place  or  elsewhere
+
+4. We provide job opportunities for candidates according to their education.
+
+5. We provide  2 to 3 Interview calls within Month for candidates.
+
+6. We provide you  job opportunities That means we provide you a Service  The registration fee for    them is 1000.
+
+7. Rs. 1000 Registration charges Will be limited for one year.
+
+8. The fee of Rs. 1000 is non-refundable.
+
+9. If all the above are acceptable then  register today. The company will contact you today for a job    according to your education and provide you with further information.
+      ''';
+      amountText = '₹1000';
+      amount = 1000.0;
+    }
+
+    bool agreedToTerms = false;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Container(
+          height: MediaQuery.of(context).size.height * 0.95,
+          padding: EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Application Instructions',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Application Fee: $amountText',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        instructions,
+                        style: TextStyle(fontSize: 16, height: 1.5),
+                      ),
+                      SizedBox(height: 20),
+                      
+                      // Referral Code Section
+                      Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Referral Code (Optional)',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'If you have a referral code, enter it below to get special benefits:',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            SizedBox(height: 12),
+                            TextField(
+                              controller: referralCodeController,
+                              decoration: InputDecoration(
+                                hintText: 'Enter referral code (optional)',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                prefixIcon: Icon(Icons.card_giftcard, color: Colors.blue),
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Icon(Icons.info_outline, color: Colors.blue, size: 16),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Referrer will receive 20% commission on your registration fee',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.blue[700],
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      SizedBox(height: 20),
+                      
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: agreedToTerms,
+                            onChanged: (value) {
+                              setState(() {
+                                agreedToTerms = value ?? false;
+                              });
+                            },
+                          ),
+                          Expanded(
+                            child: Text(
+                              'I agree to the terms and conditions and understand the application fee.',
+                              style: TextStyle(fontSize: 14),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: agreedToTerms ? () {
+                    Navigator.pop(context);
+                    _showPaymentOptions(job, amount, referralCodeController.text);
+                  } : null,
+                  child: Text('Proceed to Payment'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: agreedToTerms ? Colors.green : Colors.grey,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPaymentOptions(Job job, double amount, String referralCode) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Payment Options',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Amount: ₹${amount.toStringAsFixed(0)}',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            if (referralCode.isNotEmpty) ...[
+              SizedBox(height: 8),
+              Text(
+                'Referral Code: $referralCode',
+                style: TextStyle(fontSize: 14, color: Colors.blue),
+              ),
+              Text(
+                'Referrer will receive 20% commission',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ],
+            SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _openPaymentGateway(job, amount, referralCode);
+                },
+                child: Text('Pay with Razorpay'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Secure payment powered by Razorpay',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _submitJobApplication(Job job, String referralCode, Map<String, String> formData, String? photoPath, String? resumePath) async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          );
+        },
+      );
+
+      // Prepare data for submission
+      final data = {
+        'name': formData['name'] ?? '',
+        'email': formData['email'] ?? '',
+        'phone': formData['phone'] ?? '',
+        'education': 'Not specified', // Default value since education field is not in the form
+        'experience': formData['experience'] ?? '',
+        'skills': formData['skills'] ?? '',
+        'job_id': job.id,
+        'referral_code': referralCode.isNotEmpty ? referralCode : '',
+        'photo_path': photoPath ?? '',
+        'resume_path': resumePath ?? '',
+        'company_name': job.companyName,
+        'package': job.package,
+        'profile': job.jobTitle,
+        'district': 'Mumbai', // Default location
+      };
+
+      print('DEBUG: Submitting application data: $data');
+
+      // Send to backend to store in database
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/submit_job_application_working.php'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(data),
+      ).timeout(Duration(seconds: 30));
+
+      print('DEBUG: Response status: ${response.statusCode}');
+      print('DEBUG: Response body: ${response.body}');
+
+      // Hide loading indicator
+      Navigator.pop(context);
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        if (responseData['success']) {
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Application submitted successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          
+          // Store application ID for payment
+          final applicationId = responseData['data']['application_id'];
+          final paymentId = responseData['data']['payment_id'];
+          
+          print('DEBUG: Application submitted successfully. ID: $applicationId, Payment ID: $paymentId');
+          
+          // Show instructions modal
+          _showInstructionsModal(job, referralCode);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(responseData['message'] ?? 'Failed to submit application'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit application. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Hide loading indicator
+      Navigator.pop(context);
+      
+      print('DEBUG: Error submitting application: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error submitting application: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _openPaymentGateway(Job job, double amount, String referralCode) {
+    try {
+      // Create payment options directly
+      var options = {
+        'key': 'rzp_live_fgQr0ACWFbL4pN',
+        'amount': (amount * 100).toInt(), // Amount in paise
+        'name': 'PlaySmart Services',
+        'description': 'Job Application Fee for ${job.jobTitle}',
+        'prefill': {
+          'contact': '',
+          'email': '',
+        },
+        'external': {
+          'wallets': ['paytm']
+        }
+      };
+      
+      print('DEBUG: Opening payment gateway with options: $options');
+      _razorpay.open(options);
+    } catch (e) {
+      print('DEBUG: Error in _openPaymentGateway: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error opening payment gateway: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+}
+
+class AllJobsPage extends StatefulWidget {
+  final List<Job> jobs;
+  final String title;
+  final String jobType;
+
+  AllJobsPage({
+    required this.jobs,
+    required this.title,
+    required this.jobType,
+  });
+
+  @override
+  _AllJobsPageState createState() => _AllJobsPageState();
+}
+
+class _AllJobsPageState extends State<AllJobsPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        backgroundColor: Color(0xFF6A11CB),
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Column(
+          children: [
+            // Header Section
+            Container(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Text(
+                    widget.title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '${widget.jobs.length} jobs available',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      color: Colors.white70,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            // Jobs List
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                ),
+                child: ListView.builder(
+                  padding: EdgeInsets.all(20),
+                  itemCount: widget.jobs.length,
+                  itemBuilder: (context, index) {
+                    final job = widget.jobs[index];
+                    return Container(
+                      margin: EdgeInsets.only(bottom: 20),
+                      child: _buildJobCardWithApplyButton(job),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildJobCardWithApplyButton(Job job) {
+    // Determine button color based on package amount (but don't show amount)
+    Color buttonColor;
+    
+    // Extract numeric value from package string (e.g., "25LPA" -> 25)
+    final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+    
+    if (packageValue != null && packageValue >= 20) {
+      // 20+ LPA jobs get orange button
+      buttonColor = Colors.orange;
+    } else {
+      // Lower package jobs get green button
+      buttonColor = Colors.green;
+    }
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+                        // Job Title
+            Text(
+              job.jobTitle,
+              style: GoogleFonts.poppins(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 12),
+            // Higher Education
+            Row(
+              children: [
+                Icon(Icons.school, color: Colors.blue[600], size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Higher Education',
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blue[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 12),
+            // Package
+            Row(
+              children: [
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 20),
+                SizedBox(width: 8),
+                Text(
+                  job.package,
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            // Apply Button (no payment amount shown)
+            GestureDetector(
+              onTap: () => _showJobApplicationForm(job),
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: buttonColor,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: buttonColor.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  'Apply',
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showJobApplicationForm(Job job) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+                      content: Container(
+              width: MediaQuery.of(context).size.width * 0.98,
+              height: MediaQuery.of(context).size.height * 0.9,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: JobApplicationForm(job: job),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class JobApplicationForm extends StatefulWidget {
+  final Job job;
+
+  JobApplicationForm({required this.job});
+
+  @override
+  _JobApplicationFormState createState() => _JobApplicationFormState();
+}
+
+class _JobApplicationFormState extends State<JobApplicationForm> {
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _educationController = TextEditingController();
+  final TextEditingController _experienceController = TextEditingController();
+  final TextEditingController _skillsController = TextEditingController();
+  final TextEditingController _referralCodeController = TextEditingController();
+  String? _selectedPhotoPath;
+  String? _selectedResumePath;
+  bool _agreedToTerms = false;
+  bool _showReferralField = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final packageValue = double.tryParse(widget.job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+    final isHighPackage = packageValue != null && packageValue >= 20;
+    final registrationFee = isHighPackage ? '₹2000' : '₹1000';
+    
+    return Column(
+      children: [
+        // Header
+        Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.1),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Apply for ${widget.job.jobTitle}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      widget.job.companyName,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: Icon(Icons.close, color: Colors.white, size: 24),
+              ),
+            ],
+          ),
+        ),
+        // Form Content - Ultra compact, no scrolling
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Compact Form Fields - 3 columns with minimal spacing
+                Row(
+                  children: [
+                    Expanded(child: _buildUltraCompactFormField('Full Name', _nameController, Icons.person)),
+                    SizedBox(width: 8),
+                    Expanded(child: _buildUltraCompactFormField('Email', _emailController, Icons.email)),
+                    SizedBox(width: 8),
+                    Expanded(child: _buildUltraCompactFormField('Phone', _phoneController, Icons.phone)),
+                  ],
+                ),
+                SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(child: _buildUltraCompactFormField('Education', _educationController, Icons.school)),
+                    SizedBox(width: 8),
+                    Expanded(child: _buildUltraCompactFormField('Experience', _experienceController, Icons.work)),
+                    SizedBox(width: 8),
+                    Expanded(child: _buildUltraCompactFormField('Referral Code', _referralCodeController, Icons.card_giftcard)),
+                  ],
+                ),
+                SizedBox(height: 12),
+                _buildUltraCompactFormField('Skills', _skillsController, Icons.psychology),
+                
+                // Compact File Uploads
+                SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(child: _buildUltraCompactFileUpload('Photo', _selectedPhotoPath, () => _pickImage(), Icons.camera_alt)),
+                    SizedBox(width: 8),
+                    Expanded(child: _buildUltraCompactFileUpload('Resume', _selectedResumePath, () => _pickResume(), Icons.description)),
+                  ],
+                ),
+                
+                // Terms Agreement
+                SizedBox(height: 12),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _agreedToTerms,
+                      onChanged: (value) {
+                        setState(() {
+                          _agreedToTerms = value ?? false;
+                        });
+                      },
+                      fillColor: MaterialStateProperty.resolveWith((states) => Colors.white),
+                      checkColor: Color(0xFF6A11CB),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    Expanded(
+                      child: Text(
+                        'I agree to terms and conditions',
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                
+                Spacer(),
+                
+                // Submit Button
+                ElevatedButton(
+                  onPressed: _agreedToTerms ? () => _submitApplication() : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Color(0xFF6A11CB),
+                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    minimumSize: Size(double.infinity, 40),
+                  ),
+                  child: Text(
+                    'Submit Application',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompactInstructionItem(String text) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 4),
+      child: Text(
+        text,
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactFormField(String label, TextEditingController controller, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 12),
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon, color: Colors.white70, size: 18),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.white30),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.white30),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.white30),
+            ),
+            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUltraCompactFormField(String label, TextEditingController controller, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        SizedBox(height: 4),
+        TextFormField(
+          controller: controller,
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 11),
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon, color: Colors.white70, size: 16),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: Colors.white30),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: Colors.white30),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: Colors.white30),
+            ),
+            contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            isDense: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompactFileUpload(String label, String? filePath, VoidCallback onTap, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        SizedBox(height: 6),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: double.infinity,
+            height: 60,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.white30, style: BorderStyle.solid),
+            ),
+            child: filePath != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.file(
+                      File(filePath),
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: 60,
+                    ),
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, color: Colors.white70, size: 20),
+                      SizedBox(height: 2),
+                      Text(
+                        'Upload $label',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUltraCompactFileUpload(String label, String? filePath, VoidCallback onTap, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 9,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        SizedBox(height: 4),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: double.infinity,
+            height: 45,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.white30, style: BorderStyle.solid),
+            ),
+            child: filePath != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.file(
+                      File(filePath),
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: 45,
+                    ),
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, color: Colors.white70, size: 16),
+                      SizedBox(height: 1),
+                      Text(
+                        'Upload $label',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 8,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInstructionItem(String text) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '• ',
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFormField(String label, TextEditingController controller, IconData icon) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          SizedBox(height: 8),
+          TextFormField(
+            controller: controller,
+            style: GoogleFonts.poppins(color: Colors.white),
+            decoration: InputDecoration(
+              prefixIcon: Icon(icon, color: Colors.white70),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.white30),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.white30),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.white30),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileUpload(String label, String? filePath, VoidCallback onTap, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        SizedBox(height: 8),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: double.infinity,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white30, style: BorderStyle.solid),
+            ),
+            child: filePath != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      File(filePath),
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: 80,
+                    ),
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, color: Colors.white70, size: 32),
+                      SizedBox(height: 4),
+                      Text(
+                        'Tap to upload $label',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 80,
+      );
+      
+      if (image != null) {
+        setState(() {
+          _selectedPhotoPath = image.path;
+        });
+      }
+    } catch (e) {
+      print('Error picking image: $e');
+    }
+  }
+
+  Future<void> _pickResume() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx'],
+        allowMultiple: false,
+      );
+      
+      if (result != null) {
+        setState(() {
+          _selectedResumePath = result.files.single.path;
+        });
+      }
+    } catch (e) {
+      print('Error picking resume: $e');
+    }
+  }
+
+  Future<void> _submitApplication() async {
+    // Validate form
+    if (_nameController.text.isEmpty ||
+        _emailController.text.isEmpty ||
+        _phoneController.text.isEmpty ||
+        _educationController.text.isEmpty ||
+        _experienceController.text.isEmpty ||
+        _skillsController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please fill all required fields'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedPhotoPath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please select a profile photo'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedResumePath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please select a resume'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          );
+        },
+      );
+
+      // Prepare data for submission
+      final data = {
+        'name': _nameController.text,
+        'email': _emailController.text,
+        'phone': _phoneController.text,
+        'education': _educationController.text,
+        'experience': _experienceController.text,
+        'skills': _skillsController.text,
+        'job_id': widget.job.id,
+        'referral_code': _referralCodeController.text.isNotEmpty ? _referralCodeController.text : '',
+        'photo_path': _selectedPhotoPath ?? '',
+        'resume_path': _selectedResumePath ?? '',
+        'company_name': widget.job.companyName,
+        'package': widget.job.package,
+        'profile': widget.job.jobTitle,
+        'district': 'Mumbai', // Default location
+      };
+
+      print('DEBUG: Submitting application data: $data');
+
+      // Send to backend to store in database
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/submit_job_application_working.php'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(data),
+      ).timeout(Duration(seconds: 30));
+
+      print('DEBUG: Response status: ${response.statusCode}');
+      print('DEBUG: Response body: ${response.body}');
+
+      // Hide loading indicator
+      Navigator.pop(context);
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        
+        if (result['success']) {
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Application submitted successfully! Data stored in database.'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          
+          // Close the form and show payment instructions
+          Navigator.pop(context);
+          
+          // Show payment instructions modal
+          _showPaymentInstructionsModal(widget.job, _referralCodeController.text);
+        } else {
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Error: ${result['message']}'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+      } else {
+        // Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Network error: HTTP ${response.statusCode}. Please try again.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      print('DEBUG: Error in _submitApplication: $e');
+      
+      // Hide loading indicator
+      Navigator.pop(context);
+      
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  void _showPaymentInstructionsModal(Job job, String referralCode) {
+    String instructions = '';
+    String amountText = '';
+    double amount = 0.0;
+
+    final packageValue = double.tryParse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim());
+    if (packageValue != null && packageValue >= 20) {
+      instructions = '''
+1. **Application Review**: Your application has been submitted and stored in our database.
+
+2. **Document Verification**: Our team will verify your uploaded documents (photo and resume).
+
+3. **Skill Assessment**: You may be contacted for a brief skill assessment or interview.
+
+4. **Payment Process**: Complete the payment of ₹2000 to proceed with job matching.
+
+5. **Job Matching**: After payment confirmation, we'll match you with suitable opportunities.
+
+6. **Support**: Our team will guide you through the entire process.
+
+**Referral Program**: If you used a referral code, the referrer will receive 20% commission on your registration fee.
+      ''';
+      amountText = '₹2000';
+      amount = 2000.0;
+    } else {
+      instructions = '''
+1. **Application Review**: Your application has been submitted and stored in our database.
+
+2. **Document Verification**: Our team will verify your uploaded documents (photo and resume).
+
+3. **Local Job Matching**: We'll match you with suitable local job opportunities.
+
+4. **Payment Process**: Complete the payment of ₹1000 to proceed with job placement.
+
+5. **Job Placement**: After payment confirmation, we'll connect you with local employers.
+
+6. **Support**: Our team will provide ongoing support throughout your job search.
+
+**Referral Program**: If you used a referral code, the referrer will receive 20% commission on your registration fee.
+      ''';
+      amountText = '₹1000';
+      amount = 1000.0;
+    }
+
+    bool agreedToTerms = false;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Container(
+          height: MediaQuery.of(context).size.height * 0.8,
+          padding: EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Payment Instructions',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Application Fee: $amountText',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        instructions,
+                        style: TextStyle(fontSize: 16, height: 1.5),
+                      ),
+                      SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: agreedToTerms,
+                            onChanged: (value) {
+                              setState(() {
+                                agreedToTerms = value ?? false;
+                              });
+                            },
+                          ),
+                          Expanded(
+                            child: Text(
+                              'I agree to the terms and conditions and understand the application fee.',
+                              style: TextStyle(fontSize: 14),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                                  child: ElevatedButton(
+                    onPressed: agreedToTerms
+                        ? () {
+                            Navigator.pop(context);
+                            _showPaymentOptions(widget.job, amount, _referralCodeController.text);
+                          }
+                        : null,
+                  child: Text('Proceed to Payment'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: agreedToTerms ? Colors.green : Colors.grey,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPaymentOptions(Job job, double amount, String referralCode) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Payment Options',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Amount: ₹${amount.toStringAsFixed(0)}',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            if (referralCode.isNotEmpty) ...[
+              SizedBox(height: 8),
+              Text(
+                'Referral Code: $referralCode',
+                style: TextStyle(fontSize: 14, color: Colors.blue),
+              ),
+              Text(
+                'Referrer will receive 20% commission',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ],
+            SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _openPaymentGateway(job, amount, referralCode);
+                },
+                child: Text('Pay with Razorpay'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Secure payment powered by Razorpay',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openPaymentGateway(Job job, double amount, String referralCode) {
+    try {
+      // Create payment options directly
+      var options = {
+        'key': 'rzp_live_fgQr0ACWFbL4pN',
+        'amount': (amount * 100).toInt(), // Amount in paise
+        'name': 'PlaySmart Services',
+        'description': 'Job Application Fee for ${job.jobTitle}',
+        'prefill': {
+          'contact': '',
+          'email': '',
+        },
+        'external': {
+          'wallets': ['paytm']
+        }
+      };
+      
+      print('DEBUG: Opening payment gateway with options: $options');
+      // Get the Razorpay instance from the parent widget
+      final mainScreen = context.findAncestorStateOfType<_MainScreenState>();
+      if (mainScreen != null) {
+        mainScreen._razorpay.open(options);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment gateway not available - MainScreen not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      print('DEBUG: Error in _openPaymentGateway: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error opening payment gateway: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+class SuccessfulCandidatesScreen extends StatelessWidget {
+  final List<JobApplication> candidates;
+
+  SuccessfulCandidatesScreen({required this.candidates});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('All Successful Candidates'),
+        backgroundColor: Color(0xFF6A11CB),
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Column(
+          children: [
+            // Header Section
+            Container(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Text(
+                    'Our Successfully Placed Candidates',
+                    style: GoogleFonts.poppins(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '${candidates.length} candidates have been successfully placed',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      color: Colors.white70,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            // Candidates Grid
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                ),
+                child: GridView.builder(
+                  padding: EdgeInsets.all(20),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.85,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 16,
+                  ),
+                  itemCount: candidates.length,
+                  itemBuilder: (context, index) {
+                    final candidate = candidates[index];
+                    return _buildCandidateCard(candidate);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCandidateCard(JobApplication candidate) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 15,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Profile Photo Section
+          Container(
+            height: 100,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              gradient: LinearGradient(
+                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Stack(
+              children: [
+                // Background Pattern
+                Positioned(
+                  top: -20,
+                  right: -20,
+                  child: Opacity(
+                    opacity: 0.1,
+                    child: Icon(
+                      Icons.star,
+                      size: 80,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                // Profile Photo
+                Center(
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 10,
+                          offset: Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: candidate.photoPath.isNotEmpty
+                        ? ClipOval(
+                            child: Image.network(
+                              candidate.photoPath,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      value: loadingProgress.expectedTotalBytes != null
+                                          ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                          : null,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  ),
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(Icons.person, size: 30, color: Colors.white),
+                              ),
+                            ),
+                          )
+                        : Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.person, size: 30, color: Colors.white),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Candidate Details
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Name
+                  Text(
+                    candidate.studentName,
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  SizedBox(height: 5),
+                  // Experience
+                  Row(
+                    children: [
+                      Icon(Icons.work, color: Colors.blue[600], size: 14),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${candidate.experience}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: Colors.grey[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 6),
+                  // Skills
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.psychology, color: Colors.green[600], size: 14),
+                      SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          candidate.skills,
+                          style: GoogleFonts.poppins(
+                            fontSize: 8,
+                            color: Colors.grey[600],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Spacer(),
+                  // Location
+                  if (candidate.district.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        Icon(Icons.location_on, color: Colors.red[600], size: 12),
+                        SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            candidate.district,
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              color: Colors.grey[500],
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  String _formatDateForCandidate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
 }

@@ -85,32 +85,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_applicant'])) {
     }
 }
 
-// Fetch all job applications
+// Get filter parameters
+$statusFilter = $_GET['status'] ?? 'all';
+$companyFilter = $_GET['company'] ?? '';
+
+// Build query
+$whereClause = "WHERE ja.is_active = 1";
+$params = [];
+$types = "";
+
+if ($statusFilter !== 'all') {
+    $whereClause .= " AND ja.application_status = ?";
+    $params[] = $statusFilter;
+    $types .= "s";
+}
+
+if (!empty($companyFilter)) {
+    $whereClause .= " AND ja.company_name LIKE ?";
+    $params[] = "%$companyFilter%";
+    $types .= "s";
+}
+
+// Get applications
 $applications = [];
 try {
     $query = "
         SELECT ja.*, j.job_title, j.package, j.location
         FROM job_applications ja
-        LEFT JOIN jobs j ON ja.job_id = j.id
+        JOIN jobs j ON ja.job_id = j.id
+        $whereClause
         ORDER BY ja.applied_date DESC
     ";
     
     $stmt = $conn->prepare($query);
+    if (!empty($params)) {
+        $stmt->bind_param($types, ...$params);
+    }
     $stmt->execute();
     $result = $stmt->get_result();
     
     while ($row = $result->fetch_assoc()) {
         $applications[] = $row;
     }
-    
-    // Debug: Log the count
-    error_log("Fetched " . count($applications) . " applications");
-    
 } catch (Exception $e) {
-    error_log('Error fetching applications: ' . $e->getMessage());
-    $error = 'Error fetching applications: ' . $e->getMessage();
+    $message = 'Error fetching applications: ' . $e->getMessage();
+    $messageType = 'error';
 }
 
+// Get unique companies for filter
+$companies = [];
+try {
+    $stmt = $conn->prepare("SELECT DISTINCT company_name FROM job_applications WHERE is_active = 1 ORDER BY company_name");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($row = $result->fetch_assoc()) {
+        $companies[] = $row['company_name'];
+    }
+} catch (Exception $e) {
+    // Ignore error for companies filter
+}
+
+// Get jobs for the modal - IMPORTANT: This must be before $conn->close()
+$jobs = [];
+try {
+    // Fetch all active jobs from the jobs table
+    $stmt = $conn->prepare("SELECT id, company_name, job_title, package, location FROM jobs WHERE is_active = 1 ORDER BY company_name, job_title");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    while ($row = $result->fetch_assoc()) {
+        $jobs[] = $row;
+    }
+    
+    // Debug: Log the number of jobs fetched
+    error_log("DEBUG: Fetched " . count($jobs) . " jobs from database");
+    
+} catch (Exception $e) {
+    error_log("Error fetching jobs: " . $e->getMessage());
+    $message = 'Error fetching jobs: ' . $e->getMessage();
+    $messageType = 'error';
+}
+
+// Close database connection after all queries
 $conn->close();
 ?>
 
@@ -632,6 +688,159 @@ $conn->close();
             opacity: 0.3;
         }
 
+        /* ===== MODAL STYLES ===== */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, var(--primary-dark), var(--secondary-dark));
+            margin: 2% auto;
+            padding: 0;
+            border-radius: var(--border-radius-xl);
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: var(--shadow-xl);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+
+        .modal-header {
+            padding: var(--spacing-lg);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header h2 {
+            color: var(--text-light);
+            font-size: var(--font-size-xl);
+            margin: 0;
+        }
+
+        .close {
+            color: var(--text-light);
+            font-size: 2rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color var(--transition-fast);
+        }
+
+        .close:hover {
+            color: var(--accent-color);
+        }
+
+        .modal form {
+            padding: var(--spacing-lg);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-lg);
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .form-group {
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: var(--spacing-sm);
+            color: var(--text-light);
+            font-weight: 500;
+            font-size: var(--font-size-sm);
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: var(--spacing-md);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: var(--border-radius-md);
+            background-color: rgba(255, 255, 255, 0.1);
+            color: var(--text-light);
+            font-size: var(--font-size-sm);
+            transition: border-color var(--transition-fast);
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .file-upload {
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: var(--border-radius-md);
+            padding: var(--spacing-lg);
+            text-align: center;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .file-upload:hover {
+            border-color: var(--accent-color);
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .file-upload input[type="file"] {
+            display: none;
+        }
+
+        .file-upload i {
+            font-size: 2rem;
+            color: var(--accent-color);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .file-upload p {
+            color: var(--text-light);
+            margin-bottom: var(--spacing-xs);
+            font-weight: 500;
+        }
+
+        .file-upload small {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: var(--font-size-xs);
+        }
+
+        .button-group {
+            display: flex;
+            gap: var(--spacing-md);
+            justify-content: flex-end;
+            margin-top: var(--spacing-xl);
+            padding-top: var(--spacing-lg);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
         @media (max-width: 768px) {
             .sidebar {
                 left: -280px;
@@ -662,6 +871,17 @@ $conn->close();
                 width: 100%;
             }
             .application-actions {
+                flex-direction: column;
+            }
+            .modal-content {
+                width: 95%;
+                margin: 5% auto;
+            }
+            .form-row {
+                grid-template-columns: 1fr;
+                gap: var(--spacing-md);
+            }
+            .button-group {
                 flex-direction: column;
             }
         }
@@ -782,11 +1002,36 @@ $conn->close();
                         </button>
                     </div>
                     <div class="card-body">
-                        <!-- Applications Count -->
-                        <div class="alert alert-info" style="margin-bottom: 20px;">
-                            <i class="fas fa-info-circle"></i> 
-                            <strong>Database Status:</strong> Found <?php echo count($applications); ?> job applications in the database.
-                        </div>
+                        <!-- Filters -->
+                        <form method="GET" class="filters">
+                            <div class="filter-group">
+                                <label for="status">Status</label>
+                                <select name="status" id="status">
+                                    <option value="all" <?php echo $statusFilter === 'all' ? 'selected' : ''; ?>>All Statuses</option>
+                                    <option value="pending" <?php echo $statusFilter === 'pending' ? 'selected' : ''; ?>>Pending</option>
+                                    <option value="shortlisted" <?php echo $statusFilter === 'shortlisted' ? 'selected' : ''; ?>>Shortlisted</option>
+                                    <option value="approved" <?php echo $statusFilter === 'approved' ? 'selected' : ''; ?>>Approved</option>
+                                    <option value="rejected" <?php echo $statusFilter === 'rejected' ? 'selected' : ''; ?>>Rejected</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="company">Company</label>
+                                <select name="company" id="company">
+                                    <option value="">All Companies</option>
+                                    <?php foreach ($companies as $company): ?>
+                                        <option value="<?php echo htmlspecialchars($company); ?>" <?php echo $companyFilter === $company ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($company); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>&nbsp;</label>
+                                <button type="submit" class="btn primary-btn">
+                                    <i class="fas fa-filter"></i> Apply Filters
+                                </button>
+                            </div>
+                        </form>
 
                         <?php if (isset($success)): ?>
                             <div class="alert alert-success">
@@ -801,48 +1046,11 @@ $conn->close();
                         <?php endif; ?>
                         
                         <?php if (empty($applications)): ?>
-                            <div class="alert alert-warning">
-                                <i class="fas fa-exclamation-triangle"></i> 
-                                <strong>No Applications Found:</strong> The database appears to be empty or there was an error fetching data.
+                            <div class="no-applications">
+                                <i class="fas fa-users"></i>
+                                <p>No applications found matching your criteria</p>
                             </div>
                         <?php else: ?>
-                            <!-- Table View for All Applications -->
-                            <div class="table-container" style="margin-bottom: 30px;">
-                                <table class="applications-table" style="width: 100%; border-collapse: collapse; background: white; color: #333;">
-                                    <thead>
-                                        <tr style="background-color: #6A0DAD; color: white;">
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">ID</th>
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Company</th>
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Student</th>
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">District</th>
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Package</th>
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Profile</th>
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Status</th>
-                                            <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Applied Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($applications as $app): ?>
-                                            <tr style="border-bottom: 1px solid #ddd;">
-                                                <td style="padding: 12px; border: 1px solid #ddd;"><?php echo htmlspecialchars($app['id']); ?></td>
-                                                <td style="padding: 12px; border: 1px solid #ddd;"><?php echo htmlspecialchars($app['company_name']); ?></td>
-                                                <td style="padding: 12px; border: 1px solid #ddd;"><?php echo htmlspecialchars($app['student_name']); ?></td>
-                                                <td style="padding: 12px; border: 1px solid #ddd;"><?php echo htmlspecialchars($app['district']); ?></td>
-                                                <td style="padding: 12px; border: 1px solid #ddd;"><?php echo htmlspecialchars($app['package']); ?></td>
-                                                <td style="padding: 12px; border: 1px solid #ddd;"><?php echo htmlspecialchars($app['profile']); ?></td>
-                                                <td style="padding: 12px; border: 1px solid #ddd;">
-                                                    <span class="status-badge status-<?php echo $app['application_status']; ?>" style="padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; text-transform: uppercase;">
-                                                        <?php echo ucfirst($app['application_status']); ?>
-                                                    </span>
-                                                </td>
-                                                <td style="padding: 12px; border: 1px solid #ddd;"><?php echo date('M d, Y', strtotime($app['applied_date'])); ?></td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                            
-                            <h3 style="color: #333; margin-bottom: 20px;">Detailed View (Cards)</h3>
                             <div class="applications-grid">
                                 <?php foreach ($applications as $app): ?>
                                     <div class="application-card">
@@ -904,7 +1112,7 @@ $conn->close();
                                                     </a>
                                                 <?php endif; ?>
                                             </div>
-                                            <form method="POST" style="display: inline;">
+                                            <form method="POST" style="display: inline;" name="update_status">
                                                 <input type="hidden" name="application_id" value="<?php echo $app['id']; ?>">
                                                 <select name="new_status" style="padding: 0.5rem; margin-right: 0.5rem; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;">
                                                     <option value="pending" <?php echo $app['application_status'] === 'pending' ? 'selected' : ''; ?>>Pending</option>
@@ -935,18 +1143,28 @@ $conn->close();
                 <span class="close" onclick="closeAddApplicantModal()">&times;</span>
             </div>
             
-            <form method="POST" enctype="multipart/form-data">
+            <form method="POST" enctype="multipart/form-data" name="add_applicant">
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="job_id">Select Job *</label>
+                        <label for="job_id">Select Job * (<?php echo count($jobs); ?> available)</label>
                         <select name="job_id" id="job_id" required>
                             <option value="">Choose a job...</option>
-                            <?php foreach ($jobs as $job): ?>
-                                <option value="<?php echo $job['id']; ?>">
-                                    <?php echo htmlspecialchars($job['company_name'] . ' - ' . $job['profile']); ?>
-                                </option>
-                            <?php endforeach; ?>
+                            <?php if (!empty($jobs)): ?>
+                                <?php foreach ($jobs as $job): ?>
+                                    <option value="<?php echo $job['id']; ?>">
+                                        <?php echo htmlspecialchars($job['company_name'] . ' - ' . $job['job_title']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <option value="" disabled>No jobs available</option>
+                            <?php endif; ?>
                         </select>
+                        <?php if (empty($jobs)): ?>
+                            <small style="color: #FF9800; margin-top: 5px; display: block;">
+                                <i class="fas fa-exclamation-triangle"></i> 
+                                No active jobs found in database. Please add jobs first.
+                            </small>
+                        <?php endif; ?>
                     </div>
                     
                     <div class="form-group">
@@ -1049,33 +1267,33 @@ $conn->close();
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const sidebar = document.querySelector('.sidebar');
-            const sidebarToggle = document.querySelector('#sidebar-toggle');
-            const mainContent = document.querySelector('.main-content');
-
-            // Toggle sidebar on button click
-            sidebarToggle.addEventListener('click', () => {
-                sidebar.classList.toggle('active');
-                document.body.classList.toggle('sidebar-active');
-            });
-
-            // Close sidebar when clicking outside on mobile
-            document.addEventListener('click', (e) => {
-                if (window.innerWidth <= 768 && sidebar.classList.contains('active') && !sidebar.contains(e.target) && !sidebarToggle.contains(e.target)) {
-                    sidebar.classList.remove('active');
-                    document.body.classList.remove('sidebar-active');
-                }
-            });
+        // Sidebar toggle functionality
+        document.getElementById('sidebar-toggle').addEventListener('click', function() {
+            document.querySelector('.sidebar').classList.toggle('active');
         });
 
-        // Modal functions
+        // Close sidebar when clicking outside on mobile
+        document.addEventListener('click', function(e) {
+            if (window.innerWidth <= 768) {
+                const sidebar = document.querySelector('.sidebar');
+                const sidebarToggle = document.getElementById('sidebar-toggle');
+                
+                if (!sidebar.contains(e.target) && !sidebarToggle.contains(e.target)) {
+                    sidebar.classList.remove('active');
+                }
+            }
+        });
+
+        // Modal functionality
         function openAddApplicantModal() {
             document.getElementById('addApplicantModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
         }
 
         function closeAddApplicantModal() {
             document.getElementById('addApplicantModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+            resetForm();
         }
 
         // Close modal when clicking outside
@@ -1086,36 +1304,246 @@ $conn->close();
             }
         }
 
-        // Application action functions
-        function viewApplication(id) {
-            // Implement view functionality
-            alert('View application ' + id);
-        }
-
-        function editApplication(id) {
-            // Implement edit functionality
-            alert('Edit application ' + id);
-        }
-
-        function deleteApplication(id) {
-            if (confirm('Are you sure you want to delete this application?')) {
-                // Implement delete functionality
-                alert('Delete application ' + id);
-            }
-        }
-
-        // Auto-fill company details when job is selected
-        document.getElementById('job_id').addEventListener('change', function() {
-            const selectedOption = this.options[this.selectedIndex];
-            if (selectedOption.value) {
-                const jobText = selectedOption.text;
-                const parts = jobText.split(' - ');
-                if (parts.length === 2) {
-                    document.getElementById('company_name').value = parts[0];
-                    document.getElementById('profile').value = parts[1];
-                }
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeAddApplicantModal();
             }
         });
+
+        // Initialize all functionality after DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Auto-fill company name when job is selected
+            const jobSelect = document.getElementById('job_id');
+            if (jobSelect) {
+                jobSelect.addEventListener('change', function() {
+                    const companyNameInput = document.getElementById('company_name');
+                    if (companyNameInput && this.value) {
+                        const selectedOption = this.options[this.selectedIndex];
+                        const jobText = selectedOption.text;
+                        const companyName = jobText.split(' - ')[0];
+                        companyNameInput.value = companyName;
+                    }
+                });
+            }
+
+            // File upload preview functionality
+            const photoInput = document.getElementById('photo');
+            if (photoInput) {
+                photoInput.addEventListener('change', function() {
+                    const file = this.files[0];
+                    const fileUpload = this.parentElement;
+                    
+                    if (file && fileUpload) {
+                        // Update icon
+                        const icon = fileUpload.querySelector('i');
+                        if (icon) {
+                            icon.className = 'fas fa-check-circle';
+                            icon.style.color = '#4CAF50';
+                        }
+                        
+                        // Update text
+                        const text = fileUpload.querySelector('p');
+                        if (text) {
+                            text.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                            text.style.color = '#4CAF50';
+                        }
+                        
+                        // Update small text
+                        const smallText = fileUpload.querySelector('small');
+                        if (smallText) {
+                            smallText.textContent = 'File selected successfully';
+                            smallText.style.color = '#4CAF50';
+                        }
+                    }
+                });
+            }
+
+            const resumeInput = document.getElementById('resume');
+            if (resumeInput) {
+                resumeInput.addEventListener('change', function() {
+                    const file = this.files[0];
+                    const fileUpload = this.parentElement;
+                    
+                    if (file && fileUpload) {
+                        // Update icon
+                        const icon = fileUpload.querySelector('i');
+                        if (icon) {
+                            icon.className = 'fas fa-check-circle';
+                            icon.style.color = '#4CAF50';
+                        }
+                        
+                        // Update text
+                        const text = fileUpload.querySelector('p');
+                        if (text) {
+                            text.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                            text.style.color = '#4CAF50';
+                        }
+                        
+                        // Update small text
+                        const smallText = fileUpload.querySelector('small');
+                        if (smallText) {
+                            smallText.textContent = 'File selected successfully';
+                            smallText.style.color = '#4CAF50';
+                        }
+                    }
+                });
+            }
+
+            // Form validation
+            const addApplicantForm = document.querySelector('form[name="add_applicant"]');
+            if (addApplicantForm) {
+                addApplicantForm.addEventListener('submit', function(e) {
+                    const requiredFields = this.querySelectorAll('[required]');
+                    let isValid = true;
+                    
+                    requiredFields.forEach(field => {
+                        if (!field.value.trim()) {
+                            isValid = false;
+                            field.style.borderColor = '#F44336';
+                            field.style.backgroundColor = 'rgba(244, 67, 54, 0.1)';
+                        } else {
+                            field.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                            field.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                        }
+                    });
+                    
+                    if (!isValid) {
+                        e.preventDefault();
+                        alert('Please fill in all required fields.');
+                    }
+                });
+            }
+
+            // Add tooltips to form fields
+            const formFields = document.querySelectorAll('.form-group input, .form-group select, .form-group textarea');
+            formFields.forEach(field => {
+                if (field.hasAttribute('placeholder')) {
+                    field.title = field.placeholder;
+                }
+            });
+            
+            // Add confirmation for status updates
+            const statusForms = document.querySelectorAll('form[name="update_status"]');
+            statusForms.forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    const statusSelect = this.querySelector('select[name="new_status"]');
+                    if (statusSelect) {
+                        const currentStatus = statusSelect.options[statusSelect.selectedIndex].text;
+                        
+                        if (!confirm(`Are you sure you want to change the status to "${currentStatus}"?`)) {
+                            e.preventDefault();
+                        }
+                    }
+                });
+            });
+
+            // Enhanced file upload interaction
+            document.querySelectorAll('.file-upload').forEach(upload => {
+                upload.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    this.style.borderColor = '#FFC107';
+                    this.style.backgroundColor = 'rgba(255, 193, 7, 0.1)';
+                });
+                
+                upload.addEventListener('dragleave', function(e) {
+                    e.preventDefault();
+                    this.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                    this.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                });
+                
+                upload.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    this.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                    this.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                    
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        const fileInput = this.querySelector('input[type="file"]');
+                        if (fileInput) {
+                            fileInput.files = files;
+                            fileInput.dispatchEvent(new Event('change'));
+                        }
+                    }
+                });
+            });
+        });
+
+        // Reset form function
+        function resetForm() {
+            const form = document.querySelector('form[name="add_applicant"]');
+            if (form) {
+                form.reset();
+                
+                // Reset file upload previews
+                const fileUploads = document.querySelectorAll('.file-upload');
+                fileUploads.forEach(upload => {
+                    const icon = upload.querySelector('i');
+                    const text = upload.querySelector('p');
+                    const smallText = upload.querySelector('small');
+                    
+                    if (upload.querySelector('#photo')) {
+                        if (icon) {
+                            icon.className = 'fas fa-camera';
+                            icon.style.color = '';
+                        }
+                        if (text) {
+                            text.textContent = 'Click to upload photo';
+                            text.style.color = '';
+                        }
+                        if (smallText) {
+                            smallText.textContent = 'Supports: JPG, PNG, GIF';
+                            smallText.style.color = '';
+                        }
+                    } else if (upload.querySelector('#resume')) {
+                        if (icon) {
+                            icon.className = 'fas fa-file-alt';
+                            icon.style.color = '';
+                        }
+                        if (text) {
+                            text.textContent = 'Click to upload resume';
+                            text.style.color = '';
+                        }
+                        if (smallText) {
+                            smallText.textContent = 'Supports: PDF, DOC, DOCX';
+                            smallText.style.color = '';
+                        }
+                    }
+                });
+                
+                // Reset field styles
+                const fields = form.querySelectorAll('input, select, textarea');
+                fields.forEach(field => {
+                    field.style.borderColor = '';
+                    field.style.backgroundColor = '';
+                });
+            }
+        }
+
+        // Auto-close alerts after 5 seconds
+        setTimeout(function() {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(alert => {
+                alert.style.opacity = '0';
+                setTimeout(() => {
+                    alert.remove();
+                }, 300);
+            });
+        }, 5000);
+
+
+
+        // Debug: Log jobs data to console
+        console.log('Jobs data:', <?php echo json_encode($jobs); ?>);
+        console.log('Jobs count:', <?php echo count($jobs); ?>);
+        
+        // Show jobs info in page
+        const jobsCount = <?php echo count($jobs); ?>;
+        if (jobsCount > 0) {
+            console.log('✅ Jobs loaded successfully:', jobsCount);
+        } else {
+            console.log('❌ No jobs loaded from database');
+        }
     </script>
 </body>
 </html> 

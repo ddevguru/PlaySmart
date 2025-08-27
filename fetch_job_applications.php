@@ -13,7 +13,7 @@ require_once 'db_config.php';
 try {
     $pdo = getDBConnection();
     
-    // Fetch active job applications
+    // Fetch all active job applications
     $stmt = $pdo->prepare("
         SELECT 
             id,
@@ -50,6 +50,14 @@ try {
             $application['company_logo_url'] = '';
         }
         unset($application['company_logo']); // Remove old field
+        
+        // Process photo URLs
+        if (!empty($application['photo_path'])) {
+            $application['photo_url'] = 'https://playsmart.co.in/uploads/photos/' . basename($application['photo_path']);
+        } else {
+            $application['photo_url'] = '';
+        }
+        unset($application['photo_path']); // Remove old field
     }
     
     echo json_encode([

@@ -48,6 +48,27 @@ class JobApplication {
       logoUrl = json['company_logo_url'].toString();
     }
     
+    // Handle photo URL - use the photo_url field directly from API
+    String photoUrl = '';
+    if (json['photo_url'] != null && json['photo_url'].toString().isNotEmpty) {
+      photoUrl = json['photo_url'].toString();
+    }
+    
+    // Handle resume URL - use the resume_url field directly from API
+    String resumeUrl = '';
+    if (json['resume_url'] != null && json['resume_url'].toString().isNotEmpty) {
+      resumeUrl = json['resume_url'].toString();
+    }
+    
+    // Also handle photo_path and resume_path for backward compatibility
+    if (photoUrl.isEmpty && json['photo_path'] != null && json['photo_path'].toString().isNotEmpty) {
+      photoUrl = json['photo_path'].toString();
+    }
+    
+    if (resumeUrl.isEmpty && json['resume_path'] != null && json['resume_path'].toString().isNotEmpty) {
+      resumeUrl = json['resume_path'].toString();
+    }
+    
     return JobApplication(
       id: json['id'],
       jobId: json['job_id'],
@@ -57,8 +78,8 @@ class JobApplication {
       district: json['district'],
       package: json['package'],
       profile: json['profile'] ?? '',
-      photoPath: json['photo_path'] ?? '',
-      resumePath: json['resume_path'] ?? '',
+      photoPath: photoUrl, // Store the full URL here
+      resumePath: resumeUrl, // Store the full URL here
       email: json['email'] ?? '',
       phone: json['phone'] ?? '',
       experience: json['experience'] ?? '',
@@ -84,5 +105,21 @@ class JobApplication {
       'applied_date': appliedDate.toIso8601String(),
       'is_active': isActive ? 1 : 0,
     };
+  }
+  
+  // Getter for photo URL - Return the stored URL directly
+  String? get photoUrl {
+    if (photoPath.isNotEmpty) {
+      return photoPath; // Return the full URL stored in photoPath
+    }
+    return null;
+  }
+  
+  // Getter for resume URL - Return the stored URL directly
+  String? get resumeUrl {
+    if (resumePath.isNotEmpty) {
+      return resumePath; // Return the full URL stored in resumePath
+    }
+    return null;
   }
 } 

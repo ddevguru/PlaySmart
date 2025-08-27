@@ -1,28 +1,21 @@
 <?php
 // Database configuration for PlaySmart app
-// Update these values according to your server setup
+// This file provides database connection functions
 
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'playsmart_db');
-define('DB_USERNAME', 'root'); // Update with your actual database username
-define('DB_PASSWORD', ''); // Update with your actual database password
-define('DB_CHARSET', 'utf8mb4');
+// Database credentials
+$host = 'localhost';
+$dbname = 'u968643667_playsmart'; // Your actual database name
+$username = 'u968643667_playsmart'; // Your actual username
+$password = 'your_actual_password'; // Replace with your actual password
+$charset = 'utf8mb4';
 
-// Base URL for the application
-define('BASE_URL', 'https://playsmart.co.in');
-
-// File upload paths
-define('UPLOAD_DIR', 'images/company_logos/');
-define('MAX_FILE_SIZE', 5 * 1024 * 1024); // 5MB
-
-// Allowed file types for company logos
-define('ALLOWED_EXTENSIONS', ['jpg', 'jpeg', 'png', 'gif']);
-
-// Database connection function
+// Database connection function using PDO
 function getDBConnection() {
+    global $host, $dbname, $username, $password, $charset;
+    
     try {
-        $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
-        $pdo = new PDO($dsn, DB_USERNAME, DB_PASSWORD);
+        $dsn = "mysql:host=$host;dbname=$dbname;charset=$charset";
+        $pdo = new PDO($dsn, $username, $password);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         
@@ -38,14 +31,16 @@ function getDBConnection() {
 
 // Alternative database connection using mysqli (for backward compatibility)
 function getDBConnectionMysqli() {
+    global $host, $username, $password, $dbname, $charset;
+    
     try {
-        $conn = new mysqli(DB_HOST, DB_USERNAME, DB_PASSWORD, DB_NAME);
+        $conn = new mysqli($host, $username, $password, $dbname);
         
         if ($conn->connect_error) {
             throw new Exception("Connection failed: " . $conn->connect_error);
         }
         
-        $conn->set_charset(DB_CHARSET);
+        $conn->set_charset($charset);
         return $conn;
     } catch (Exception $e) {
         error_log("MySQLi connection failed: " . $e->getMessage());
@@ -53,22 +48,14 @@ function getDBConnectionMysqli() {
     }
 }
 
-// Helper function to validate file uploads
-function validateFileUpload($file) {
-    if (!isset($file) || $file['error'] !== UPLOAD_ERR_OK) {
-        return false;
+// Function to check database connection
+function checkDatabaseConnection() {
+    try {
+        $pdo = getDBConnection();
+        return ['success' => true, 'message' => 'Database connection successful'];
+    } catch (Exception $e) {
+        return ['success' => false, 'message' => $e->getMessage()];
     }
-    
-    if ($file['size'] > MAX_FILE_SIZE) {
-        return false;
-    }
-    
-    $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    if (!in_array($extension, ALLOWED_EXTENSIONS)) {
-        return false;
-    }
-    
-    return true;
 }
 
 // Helper function to sanitize input
@@ -90,13 +77,14 @@ function generateResponse($success, $message, $data = null, $statusCode = 200) {
     ]);
 }
 
-// Helper function to check if database is accessible
-function checkDatabaseConnection() {
+// Test database connection
+if (isset($_GET['test_connection'])) {
     try {
         $pdo = getDBConnection();
-        return ['success' => true, 'message' => 'Database connection successful'];
+        echo "Database connection successful!";
     } catch (Exception $e) {
-        return ['success' => false, 'message' => $e->getMessage()];
+        echo "Database connection failed: " . $e->getMessage();
     }
+    exit;
 }
 ?> 
