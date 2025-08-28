@@ -11,17 +11,17 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role
 $message = '';
 $messageType = '';
 
-// Handle candidate deletion
-if (isset($_POST['delete_candidate'])) {
-    $candidateId = intval($_POST['candidate_id']);
-    try {
-        $stmt = $conn->prepare("UPDATE successful_candidates SET is_active = 0 WHERE id = ?");
-        $stmt->bind_param("i", $candidateId);
+        // Handle job deletion
+        if (isset($_POST['delete_job'])) {
+            $jobId = intval($_POST['job_id']);
+            try {
+                $stmt = $conn->prepare("UPDATE new_jobs SET is_active = 0 WHERE id = ?");
+                $stmt->bind_param("i", $jobId);
         if ($stmt->execute()) {
-            $message = 'Candidate deleted successfully!';
+            $message = 'Job deleted successfully!';
             $messageType = 'success';
         } else {
-            $message = 'Error deleting candidate';
+            $message = 'Error deleting job';
             $messageType = 'error';
         }
     } catch (Exception $e) {
@@ -30,42 +30,39 @@ if (isset($_POST['delete_candidate'])) {
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['delete_candidate'])) {
-    $companyName = trim($_POST['company_name'] ?? '');
-    $candidateName = trim($_POST['candidate_name'] ?? '');
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['delete_job'])) {
+    $jobPost = trim($_POST['job_post'] ?? '');
     $salary = trim($_POST['salary'] ?? '');
-    $jobLocation = trim($_POST['job_location'] ?? '');
+    $education = trim($_POST['education'] ?? '');
+    $jobType = $_POST['job_type'] ?? 'higher_job';
 
     // Validation
     $errors = [];
-    if (empty($companyName)) {
-        $errors[] = 'Company name is required.';
-    }
-    if (empty($candidateName)) {
-        $errors[] = 'Candidate name is required.';
+    if (empty($jobPost)) {
+        $errors[] = 'Job post is required.';
     }
     if (empty($salary)) {
         $errors[] = 'Salary is required.';
     }
-    if (empty($jobLocation)) {
-        $errors[] = 'Job location is required.';
+    if (empty($education)) {
+        $errors[] = 'Education is required.';
     }
 
     if (empty($errors)) {
         try {
             $conn->begin_transaction();
 
-            // Insert new successful candidate
+            // Insert new job
             $stmt = $conn->prepare("
-                INSERT INTO successful_candidates (company_name, candidate_name, salary, job_location, is_active, created_at)
+                INSERT INTO new_jobs (job_post, salary, education, job_type, is_active, created_at)
                 VALUES (?, ?, ?, ?, 1, NOW())
             ");
             
-            $stmt->bind_param("ssss", $companyName, $candidateName, $salary, $jobLocation);
+            $stmt->bind_param("ssss", $jobPost, $salary, $education, $jobType);
             
             if ($stmt->execute()) {
                 $conn->commit();
-                $message = 'Successful candidate added successfully!';
+                $message = 'Job added successfully!';
                 $messageType = 'success';
                 
                 // Clear form data
@@ -76,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['delete_candidate'])) 
             $stmt->close();
         } catch (Exception $e) {
             $conn->rollback();
-            $message = 'Error adding successful candidate: ' . $e->getMessage();
+            $message = 'Error adding job: ' . $e->getMessage();
             $messageType = 'error';
         }
     } else {
@@ -85,21 +82,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['delete_candidate'])) 
     }
 }
 
-// Get all successful candidates
-$candidates = [];
+// Get all jobs
+$jobs = [];
 try {
     $stmt = $conn->prepare("
-        SELECT * FROM successful_candidates 
+        SELECT * FROM new_jobs 
         WHERE is_active = 1 
         ORDER BY created_at DESC
     ");
     $stmt->execute();
     $result = $stmt->get_result();
     while ($row = $result->fetch_assoc()) {
-        $candidates[] = $row;
+        $jobs[] = $row;
     }
 } catch (Exception $e) {
-    $message = 'Error fetching candidates: ' . $e->getMessage();
+    $message = 'Error fetching jobs: ' . $e->getMessage();
     $messageType = 'error';
 }
 
@@ -111,7 +108,7 @@ $conn->close();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Play Smart - Add Successful Candidate</title>
+    <title>Play Smart - Add New Job</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -440,6 +437,11 @@ $conn->close();
             color: rgba(255, 255, 255, 0.5);
         }
 
+        .form-group select option {
+            color: var(--text-dark);
+            background-color: var(--text-light);
+        }
+
         .form-actions {
             display: flex;
             justify-content: flex-end;
@@ -526,15 +528,15 @@ $conn->close();
             color: var(--text-light);
         }
 
-        /* ===== CANDIDATES LIST STYLES ===== */
-        .candidates-grid {
+        /* ===== JOBS LIST STYLES ===== */
+        .jobs-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: var(--spacing-lg);
             margin-top: var(--spacing-lg);
         }
 
-        .candidate-card {
+        .job-card {
             background-color: rgba(255, 255, 255, 0.1);
             border-radius: var(--border-radius-lg);
             padding: var(--spacing-lg);
@@ -542,19 +544,19 @@ $conn->close();
             transition: all var(--transition-normal);
         }
 
-        .candidate-card:hover {
+        .job-card:hover {
             transform: translateY(-4px);
             box-shadow: var(--shadow-lg);
             background-color: rgba(255, 255, 255, 0.15);
         }
 
-        .candidate-header {
+        .job-header {
             display: flex;
             align-items: center;
             margin-bottom: var(--spacing-md);
         }
 
-        .company-logo {
+        .job-icon {
             width: 50px;
             height: 50px;
             background: var(--accent-color);
@@ -568,22 +570,22 @@ $conn->close();
             margin-right: var(--spacing-md);
         }
 
-        .candidate-info h3 {
+        .job-info h3 {
             font-size: var(--font-size-lg);
             margin-bottom: var(--spacing-xs);
             color: var(--text-light);
         }
 
-        .candidate-info p {
+        .job-info p {
             color: rgba(255, 255, 255, 0.7);
             font-size: var(--font-size-sm);
         }
 
-        .candidate-details {
+        .job-details {
             margin-bottom: var(--spacing-md);
         }
 
-        .candidate-detail {
+        .job-detail {
             display: flex;
             justify-content: space-between;
             margin-bottom: var(--spacing-sm);
@@ -591,26 +593,26 @@ $conn->close();
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .candidate-detail:last-child {
+        .job-detail:last-child {
             border-bottom: none;
         }
 
-        .candidate-detail span:first-child {
+        .job-detail span:first-child {
             color: rgba(255, 255, 255, 0.7);
             font-size: var(--font-size-sm);
         }
 
-        .candidate-detail span:last-child {
+        .job-detail span:last-child {
             color: var(--text-light);
             font-weight: 500;
         }
 
-        .candidate-actions {
+        .job-actions {
             display: flex;
             gap: var(--spacing-sm);
         }
 
-        .candidate-actions .btn {
+        .job-actions .btn {
             flex: 1;
             padding: var(--spacing-sm) var(--spacing-md);
             font-size: var(--font-size-sm);
@@ -626,6 +628,25 @@ $conn->close();
             font-size: 4rem;
             margin-bottom: var(--spacing-md);
             opacity: 0.3;
+        }
+
+        .job-type-badge {
+            display: inline-block;
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: var(--border-radius-full);
+            font-size: var(--font-size-xs);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .job-type-higher {
+            background-color: var(--primary-light);
+            color: var(--text-light);
+        }
+
+        .job-type-local {
+            background-color: var(--accent-color);
+            color: var(--text-dark);
         }
 
         @media (max-width: 768px) {
@@ -649,7 +670,7 @@ $conn->close();
             .form-actions {
                 flex-direction: column;
             }
-            .candidates-grid {
+            .jobs-grid {
                 grid-template-columns: 1fr;
             }
         }
@@ -668,6 +689,12 @@ $conn->close();
                         <a href="dashboard.php">
                             <i class="fas fa-tachometer-alt"></i>
                             <span>Dashboard</span>
+                        </a>
+                    </li>
+                    <li class="active">
+                        <a href="add_job_new.php">
+                            <i class="fas fa-briefcase"></i>
+                            <span>Add New Job</span>
                         </a>
                     </li>
                     <li>
@@ -736,7 +763,7 @@ $conn->close();
                             <span>Payment History</span>
                         </a>
                     </li>
-                    <li class="active">
+                    <li>
                         <a href="add_successful_candidate.php">
                             <i class="fas fa-user-check"></i>
                             <span>Add Successful Candidate</span>
@@ -753,7 +780,7 @@ $conn->close();
             <header class="content-header">
                 <div class="header-left">
                     <button id="sidebar-toggle" class="sidebar-toggle"><i class="fas fa-bars"></i></button>
-                    <h1>Add Successful Candidate</h1>
+                    <h1>Add New Job</h1>
                 </div>
             </header>
 
@@ -767,87 +794,95 @@ $conn->close();
 
                 <div class="card">
                     <div class="card-header">
-                        <h2>Successful Candidate Details</h2>
-                        <p>Fill in the details to add a new successfully placed candidate</p>
+                        <h2>Job Details</h2>
+                        <p>Fill in the details to add a new job posting</p>
                     </div>
                     <div class="card-body">
                         <form method="POST" class="form">
-                            <div class="form-row two-columns">
+                            <div class="form-row">
                                 <div class="form-group">
-                                    <label for="company_name"><i class="fas fa-building"></i> Company Name</label>
-                                    <input type="text" id="company_name" name="company_name" placeholder="Enter company name" value="<?php echo htmlspecialchars($_POST['company_name'] ?? ''); ?>" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="candidate_name"><i class="fas fa-user"></i> Candidate Name</label>
-                                    <input type="text" id="candidate_name" name="candidate_name" placeholder="Enter candidate name" value="<?php echo htmlspecialchars($_POST['candidate_name'] ?? ''); ?>" required>
+                                    <label for="job_post"><i class="fas fa-briefcase"></i> Job Post</label>
+                                    <input type="text" id="job_post" name="job_post" placeholder="Enter job post/title" value="<?php echo htmlspecialchars($_POST['job_post'] ?? ''); ?>" required>
                                 </div>
                             </div>
 
                             <div class="form-row two-columns">
                                 <div class="form-group">
                                     <label for="salary"><i class="fas fa-coins"></i> Salary</label>
-                                    <input type="text" id="salary" name="salary" placeholder="e.g., 25LPA, $80K" value="<?php echo htmlspecialchars($_POST['salary'] ?? ''); ?>" required>
+                                    <input type="text" id="salary" name="salary" placeholder="e.g., 25LPA, $80K, 50000" value="<?php echo htmlspecialchars($_POST['salary'] ?? ''); ?>" required>
                                 </div>
                                 <div class="form-group">
-                                    <label for="job_location"><i class="fas fa-map-marker-alt"></i> Job Location</label>
-                                    <input type="text" id="job_location" name="job_location" placeholder="Enter job location" value="<?php echo htmlspecialchars($_POST['job_location'] ?? ''); ?>" required>
+                                    <label for="education"><i class="fas fa-graduation-cap"></i> Education</label>
+                                    <input type="text" id="education" name="education" placeholder="e.g., B.Tech, MBA, 12th Pass" value="<?php echo htmlspecialchars($_POST['education'] ?? ''); ?>" required>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="job_type"><i class="fas fa-filter"></i> Job Type</label>
+                                    <select id="job_type" name="job_type" required>
+                                        <option value="higher_job" <?php echo ($_POST['job_type'] ?? '') === 'higher_job' ? 'selected' : ''; ?>>Higher Job</option>
+                                        <option value="local_job" <?php echo ($_POST['job_type'] ?? '') === 'local_job' ? 'selected' : ''; ?>>Local Job</option>
+                                    </select>
                                 </div>
                             </div>
 
                             <div class="form-actions">
                                 <button type="reset" class="btn secondary-btn"><i class="fas fa-undo"></i> Reset</button>
-                                <button type="submit" class="btn primary-btn"><i class="fas fa-plus-circle"></i> Add Candidate</button>
+                                <button type="submit" class="btn primary-btn"><i class="fas fa-plus-circle"></i> Add Job</button>
                             </div>
                         </form>
                     </div>
                 </div>
 
-                <!-- Candidates List Section -->
+                <!-- Jobs List Section -->
                 <div class="card">
                     <div class="card-header">
-                        <h2>Successful Candidates List</h2>
-                        <p>View all successfully placed candidates</p>
+                        <h2>Jobs List</h2>
+                        <p>View all added jobs</p>
                     </div>
                     <div class="card-body">
-                        <?php if (empty($candidates)): ?>
+                        <?php if (empty($jobs)): ?>
                             <div class="empty-state">
-                                <i class="fas fa-user-check"></i>
-                                <p>No successful candidates added yet</p>
-                                <p style="font-size: var(--font-size-sm); margin-top: var(--spacing-sm);">Add your first successful candidate using the form above</p>
+                                <i class="fas fa-briefcase"></i>
+                                <p>No jobs added yet</p>
+                                <p style="font-size: var(--font-size-sm); margin-top: var(--spacing-sm);">Add your first job using the form above</p>
                             </div>
                         <?php else: ?>
-                            <div class="candidates-grid">
-                                <?php foreach ($candidates as $candidate): ?>
-                                    <div class="candidate-card">
-                                        <div class="candidate-header">
-                                            <div class="company-logo">
-                                                <?php echo strtoupper(substr($candidate['company_name'], 0, 1)); ?>
+                            <div class="jobs-grid">
+                                <?php foreach ($jobs as $job): ?>
+                                    <div class="job-card">
+                                        <div class="job-header">
+                                            <div class="job-icon">
+                                                <i class="fas fa-briefcase"></i>
                                             </div>
-                                            <div class="candidate-info">
-                                                <h3><?php echo htmlspecialchars($candidate['candidate_name']); ?></h3>
-                                                <p><?php echo htmlspecialchars($candidate['company_name']); ?></p>
+                                            <div class="job-info">
+                                                <h3><?php echo htmlspecialchars($job['job_post'] ?? 'N/A'); ?></h3>
+                                                <span class="job-type-badge job-type-<?php echo ($job['job_type'] === 'higher_job') ? 'higher' : 'local'; ?>">
+                                                    <?php echo ($job['job_type'] === 'higher_job') ? 'Higher Job' : 'Local Job'; ?>
+                                                </span>
                                             </div>
                                         </div>
                                         
-                                        <div class="candidate-details">
-                                            <div class="candidate-detail">
+                                        <div class="job-details">
+                                            <div class="job-detail">
                                                 <span>Salary:</span>
-                                                <span><?php echo htmlspecialchars($candidate['salary']); ?></span>
+                                                <span><?php echo htmlspecialchars($job['salary'] ?? 'N/A'); ?></span>
                                             </div>
-                                            <div class="candidate-detail">
-                                                <span>Location:</span>
-                                                <span><?php echo htmlspecialchars($candidate['job_location']); ?></span>
+                                            <div class="job-detail">
+                                                <span>Education:</span>
+                                                <span><?php echo htmlspecialchars($job['education'] ?? 'N/A'); ?></span>
                                             </div>
-                                            <div class="candidate-detail">
+                                            <div class="job-detail">
                                                 <span>Added:</span>
-                                                <span><?php echo date('M d, Y', strtotime($candidate['created_at'])); ?></span>
+                                                <span><?php echo date('M d, Y', strtotime($job['created_at'])); ?></span>
                                             </div>
                                         </div>
                                         
-                                        <div class="candidate-actions">
-                                            <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this candidate?')">
-                                                <input type="hidden" name="candidate_id" value="<?php echo $candidate['id']; ?>">
-                                                <button type="submit" name="delete_candidate" class="btn danger-btn">
+                                        <div class="job-actions">
+                                            <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this job?')">
+                                                <input type="hidden" name="job_id" value="<?php echo $job['id']; ?>">
+                                                <button type="submit" name="delete_job" class="btn danger-btn">
                                                     <i class="fas fa-trash"></i> Delete
                                                 </button>
                                             </form>

@@ -1,31 +1,38 @@
 -- Job Applications Table
 -- This table stores information about students who have applied for jobs
 
-CREATE TABLE IF NOT EXISTS `job_applications` (
+CREATE TABLE `job_applications` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `job_id` int(11) NOT NULL,
-  `company_name` varchar(255) NOT NULL,
+  `job_type` enum('higher_job','local_job') NOT NULL DEFAULT 'higher_job',
+  `company_name` varchar(100) NOT NULL,
   `company_logo` varchar(255) DEFAULT NULL,
-  `student_name` varchar(255) NOT NULL,
+  `student_name` varchar(100) NOT NULL,
   `district` varchar(100) NOT NULL,
   `package` varchar(50) NOT NULL,
-  `profile` varchar(255) DEFAULT NULL,
-  `photo_path` varchar(500) DEFAULT NULL,
-  `resume_path` varchar(500) DEFAULT NULL,
-  `email` varchar(255) DEFAULT NULL,
-  `phone` varchar(20) DEFAULT NULL,
-  `experience` varchar(100) DEFAULT NULL,
+  `profile` varchar(100) NOT NULL,
+  `photo_path` varchar(255) DEFAULT NULL,
+  `resume_path` varchar(255) DEFAULT NULL,
+  `email` varchar(100) NOT NULL,
+  `phone` varchar(20) NOT NULL,
+  `experience` varchar(100) NOT NULL,
   `skills` text DEFAULT NULL,
-  `payment_id` varchar(255) DEFAULT NULL,
-  `application_status` enum('pending','shortlisted','rejected','accepted') DEFAULT 'pending',
-  `applied_date` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `referral_code` varchar(50) DEFAULT NULL,
+  `payment_id` varchar(100) DEFAULT NULL,
+  `payment_status` enum('pending','completed','failed') DEFAULT 'pending',
+  `application_status` enum('pending','shortlisted','approved','rejected') DEFAULT 'pending',
+  `applied_date` timestamp DEFAULT CURRENT_TIMESTAMP,
+  `is_active` tinyint(1) DEFAULT 1,
+  `application_version` varchar(20) DEFAULT '1.0',
   PRIMARY KEY (`id`),
-  KEY `job_id` (`job_id`),
-  KEY `company_name` (`company_name`),
-  KEY `student_name` (`student_name`),
-  KEY `application_status` (`application_status`),
-  KEY `is_active` (`is_active`)
+  KEY `idx_job_id` (`job_id`),
+  KEY `idx_job_type` (`job_type`),
+  KEY `idx_company_name` (`company_name`),
+  KEY `idx_student_name` (`student_name`),
+  KEY `idx_application_status` (`application_status`),
+  KEY `idx_payment_status` (`payment_status`),
+  KEY `idx_applied_date` (`applied_date`),
+  KEY `idx_is_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Sample data for job applications

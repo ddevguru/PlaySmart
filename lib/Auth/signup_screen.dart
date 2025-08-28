@@ -488,14 +488,14 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
         ),
         textInputAction: TextInputAction.next,
       ),
-      // _buildInputField(
-      //   controller: _referralController,
-      //   labelText: 'Referral Code (Optional)',
-      //   prefixIcon: Icons.card_giftcard_outlined,
-      //   focusNode: _referralFocus,
-      //   textInputAction: TextInputAction.done,
-      //   onFieldSubmitted: (_) => _signup(),
-      // ),
+      _buildInputField(
+        controller: _referralController,
+        labelText: 'Referral Code (Optional)',
+        prefixIcon: Icons.card_giftcard_outlined,
+        focusNode: _referralFocus,
+        textInputAction: TextInputAction.done,
+        onFieldSubmitted: (_) => _signup(),
+      ),
     ];
 
     List<Widget> animatedFields = [];

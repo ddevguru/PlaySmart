@@ -1,15 +1,15 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../Models/job_application.dart';
+import '../Models/successful_candidate.dart';
 
 class SuccessfulCandidatesController {
   static const String baseUrl = 'https://playsmart.co.in';
   
-  // Fetch successfully placed candidates
-  static Future<List<JobApplication>> fetchSuccessfulCandidates() async {
+  // Fetch successfully placed candidates from new table
+  static Future<List<SuccessfulCandidate>> fetchSuccessfulCandidates() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/fetch_successful_candidates.php'),
+        Uri.parse('$baseUrl/fetch_successful_candidates_new.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -20,7 +20,7 @@ class SuccessfulCandidatesController {
         
         if (responseData['success'] == true) {
           final List<dynamic> candidatesData = responseData['data'];
-          return candidatesData.map((json) => JobApplication.fromJson(json)).toList();
+          return candidatesData.map((json) => SuccessfulCandidate.fromJson(json)).toList();
         } else {
           throw Exception(responseData['message'] ?? 'Failed to fetch successful candidates');
         }
@@ -32,7 +32,7 @@ class SuccessfulCandidatesController {
     }
   }
 
-  // Get candidate photo URL
+  // Get candidate photo URL (placeholder for future use)
   static String getCandidatePhotoUrl(String? photoPath) {
     if (photoPath == null || photoPath.isEmpty) {
       return ''; // Return empty string for no photo
@@ -40,20 +40,12 @@ class SuccessfulCandidatesController {
     return '$baseUrl/Admin/uploads/photos/$photoPath';
   }
 
-  // Get company logo URL
+  // Get company logo URL (placeholder for future use)
   static String getCompanyLogoUrl(String? logoPath) {
     if (logoPath == null || logoPath.isEmpty) {
       return ''; // Return empty string for no logo
     }
     return '$baseUrl/Admin/uploads/$logoPath';
-  }
-
-  // Get resume URL
-  static String getResumeUrl(String? resumePath) {
-    if (resumePath == null || resumePath.isEmpty) {
-      return ''; // Return empty string for no resume
-    }
-    return '$baseUrl/uploads/resumes/$resumePath';
   }
 
   // Format experience for display

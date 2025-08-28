@@ -78,7 +78,50 @@ flutter:
   assets:
     - assets/icon/logo.jpg
     - assets/icon/b1.jpg
-
+    - assets/icon/adani.jpg 
+    - assets/icon/airtel.jpg
+    - assets/icon/apollo.jpg
+    - assets/icon/assian.jpg
+    - assets/icon/Bajaj.jpg
+    - assets/icon/batra.jpg
+    - assets/icon/britannia.jpg
+    - assets/icon/bsnl.jpg
+    - assets/icon/byjus.jpg
+    - assets/icon/cadbury.jpg
+    - assets/icon/cap.jpg
+    - assets/icon/captial.jpg
+    - assets/icon/cipla.jpg
+    - assets/icon/colf.jpg
+    - assets/icon/dabur.jpg
+    - assets/icon/fiat.jpg
+    - assets/icon/Hero.jpg
+    - assets/icon/honda.jpg
+    - assets/icon/ibm.jpg
+    - assets/icon/info.jpg
+    - assets/icon/itc.jpg
+    - assets/icon/jio.jpg
+    - assets/icon/lg.jpg
+    - assets/icon/LIFE.jpg
+    - assets/icon/lux.jpg
+    - assets/icon/mahindra.jpg
+    - assets/icon/MRF.jpg
+    - assets/icon/newholland.jpg
+    - assets/icon/ola.jpg
+    - assets/icon/reliance.jpg
+    - assets/icon/santoor.jpg
+    - assets/icon/serco.png
+    - assets/icon/skybags.png
+    - assets/icon/swiggy.jpg
+    - assets/icon/syntel.jpg
+    - assets/icon/tata.jpg
+    - assets/icon/tatagreen.jpg
+    - assets/icon/tcs.jpg
+    - assets/icon/tech.jpg
+    - assets/icon/uber.jpg
+    - assets/icon/Videocon.jpg
+    - assets/icon/Wheels.jpg
+    - assets/icon/wipro.jpg
+    - assets/icon/zomato.jpg
 
 flutter_launcher_icons:
   android: "launcher_icon"

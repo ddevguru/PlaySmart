@@ -20,6 +20,10 @@ import 'package:playsmart/controller/job_application_controller.dart';
 import 'package:playsmart/controller/job_controller.dart';
 import 'package:playsmart/controller/mega-contest-controller.dart';
 import 'package:playsmart/controller/mini-contest-controller.dart';
+import 'package:playsmart/controller/successful_candidates_controller.dart';
+import 'package:playsmart/Models/successful_candidate.dart';
+import 'package:playsmart/controller/new_jobs_controller.dart';
+import 'package:playsmart/Models/new_job.dart';
 import 'package:playsmart/mega_quiz_screen.dart';
 import 'package:playsmart/mega_result_screen.dart';
 import 'package:playsmart/mega_score_service.dart';
@@ -27,6 +31,7 @@ import 'package:playsmart/profile_Screen.dart';
 import 'package:playsmart/quiz_screen.dart';
 import 'package:playsmart/score_service.dart';
 import 'package:playsmart/splash_screen.dart';
+import 'package:playsmart/successful_candidates_screen.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -47,17 +52,30 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   late AnimationController _pulseController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  late ScrollController _jobApplicationsScrollController;
-  Timer? _autoScrollTimer; // Make nullable
+          late ScrollController _jobApplicationsScrollController;
+     late ScrollController _companyLogosScrollController;
+     late ScrollController _higherPackageJobsScrollController;
+     late ScrollController _localJobsScrollController;
+     late ScrollController _successfulCandidatesScrollController;
+   Timer? _autoScrollTimer; // Make nullable
+   Timer? _companyLogosScrollTimer; // Timer for company logos auto-scroll
+   Timer? _higherPackageJobsScrollTimer; // Timer for higher package jobs auto-scroll
+   Timer? _localJobsScrollTimer; // Timer for local jobs auto-scroll
+   Timer? _successfulCandidatesScrollTimer; // Timer for successful candidates auto-scroll
   double userBalance = 0.0;
   List<Contest> miniContests = [];
   List<Contest> megaContests = [];
   List<Job> jobs = [];
   List<Job> higherPackageJobs = [];
   List<Job> localJobs = [];
+  List<NewJob> newJobs = [];
+  List<NewJob> newHigherPackageJobs = [];
+  List<NewJob> newLocalJobs = [];
   List<JobApplication> jobApplications = [];
+  List<SuccessfulCandidate> successfulCandidates = [];
   Map<int, String> userJobApplications = {}; // Track user's job applications
   Job? _currentJobApplication; // Track current job being applied for
+  int? _currentApplicationId; // Track current application ID for payment
   final ContestController _miniContestController = ContestController();
   final MegaContestController _megaContestController = MegaContestController();
   Timer? _refreshTimer;
@@ -84,7 +102,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   void initState() {
     super.initState();
     
-    // Initialize Razorpay
+    // Initialize Razorpay - RESTORE ORIGINAL WORKING CODE
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
@@ -106,7 +124,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       vsync: this,
     );
     
-    _jobApplicationsScrollController = ScrollController();
+         _jobApplicationsScrollController = ScrollController();
+     _companyLogosScrollController = ScrollController();
+     _higherPackageJobsScrollController = ScrollController();
+     _localJobsScrollController = ScrollController();
+     _successfulCandidatesScrollController = ScrollController();
     
     // Initialize fade animation
     _fadeAnimation = Tween<double>(
@@ -134,6 +156,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     // Check login status first before initializing data
     _checkLoginStatusAndInitialize();
     
+    // Test Razorpay after a short delay
+    Future.delayed(Duration(seconds: 3), () {
+      if (mounted) {
+        print('DEBUG: Testing Razorpay initialization...');
+        print('DEBUG: Razorpay instance: $_razorpay');
+        print('DEBUG: Razorpay type: ${_razorpay.runtimeType}');
+      }
+    });
+    
     // Set up periodic token validation (much less frequent to avoid logout issues)
     Timer.periodic(Duration(minutes: 30), (timer) {
       validateAndRefreshToken();
@@ -153,11 +184,32 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     _animationController.dispose();
     _floatingIconsController.dispose();
     _pulseController.dispose();
-    _jobApplicationsScrollController.dispose();
-    _autoScrollTimer?.cancel(); // Safe cancel
-    _autoScrollTimer = null; // Set to null
-    _refreshTimer?.cancel();
-    _razorpay.clear();
+         _jobApplicationsScrollController.dispose();
+     _companyLogosScrollController.dispose();
+     _higherPackageJobsScrollController.dispose();
+     _localJobsScrollController.dispose();
+     _successfulCandidatesScrollController.dispose();
+     _autoScrollTimer?.cancel(); // Safe cancel
+     _autoScrollTimer = null; // Set to null
+     _companyLogosScrollTimer?.cancel();
+     _companyLogosScrollTimer = null;
+     _higherPackageJobsScrollTimer?.cancel();
+     _higherPackageJobsScrollTimer = null;
+     _localJobsScrollTimer?.cancel();
+     _localJobsScrollTimer = null;
+     _successfulCandidatesScrollTimer?.cancel();
+     _successfulCandidatesScrollTimer = null;
+     _refreshTimer?.cancel();
+    
+    // Safely dispose Razorpay
+    try {
+      if (_razorpay != null) {
+        _razorpay.clear();
+      }
+    } catch (e) {
+      print('DEBUG: Error disposing Razorpay: $e');
+    }
+    
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -173,6 +225,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         
         // CRITICAL FIX: Recover session if needed
         _recoverSessionIfNeeded();
+        
+        // Check and reinitialize Razorpay if needed
+        if (_razorpay == null) {
+          print('DEBUG: Razorpay is null on resume, reinitializing...');
+          _razorpay = Razorpay();
+          _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+          _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+          _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+        }
         break;
       case AppLifecycleState.paused:
         print('🔐 DEBUG: App paused - updating last activity...');
@@ -437,26 +498,25 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     }
   }
 
-  void _initializeData() {
-    print('DEBUG: Initializing app data...');
-    fetchUserBalance();
-    fetchContests();
-    fetchJobApplications();
-    fetchJobs();
-    _startRefreshTimer();
-    _startAutoScroll(); // This will now be safe
-    
-    print('DEBUG: App data initialization started');
-  }
+     void _initializeData() {
+     print('DEBUG: Initializing app data...');
+     fetchUserBalance();
+     fetchContests();
+     fetchJobApplications();
+     fetchSuccessfulCandidates();
+     fetchNewJobs();
+     fetchJobs();
+     _startRefreshTimer();
+     _startAutoScroll(); // This will now be safe
+     _startCompanyLogosAutoScroll(); // Start auto-scroll for company logos
+     _startSuccessfulCandidatesAutoScroll(); // Start auto-scroll for successful candidates
+     
+     print('DEBUG: App data initialization started');
+   }
 
 
 
-  void _initializeRazorpay() {
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
-  }
+
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
     print('=== PAYMENT SUCCESS HANDLER STARTED ===');
@@ -474,11 +534,12 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     if (_currentJobApplication != null) {
       // Use the actual job ID from the current job being applied to
       int jobId = _currentJobApplication!.id;
-      print('DEBUG: Setting job $jobId status to accepted');
+      print('DEBUG: Setting job $jobId status to pending (initial status)');
       print('DEBUG: _currentJobApplication!.id = ${_currentJobApplication!.id}');
       
       // Update local status immediately and PERSIST it
-      userJobApplications[jobId] = 'accepted';
+      // Set initial status as 'pending' since payment is complete but application is under review
+      userJobApplications[jobId] = 'pending';
       print('DEBUG: userJobApplications after update: $userJobApplications');
       
       // Force immediate UI update to show status button
@@ -492,6 +553,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           _currentJobApplication!,
           _selectedPhotoPath!,
           _selectedResumePath!,
+        );
+      }
+      
+      // Update payment status in database
+      if (_currentApplicationId != null) {
+        await _updatePaymentStatus(
+          _currentApplicationId!,
+          response.paymentId ?? '',
+          'completed',
         );
       }
       
@@ -517,6 +587,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     
     // Also refresh jobs to ensure they're displayed
     await fetchJobs();
+    
+    // Refresh new jobs to ensure they're displayed
+    await fetchNewJobs();
     
     // Force one more UI refresh to ensure everything is updated
     setState(() {
@@ -563,14 +636,23 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         setState(() {
           jobApplications = applicationsData;
           
-          // Update local map with fetched applications BUT preserve local 'accepted' status
+          // Update local map with fetched applications BUT preserve local statuses
           for (var application in applicationsData) {
-            // Only update if we don't have a local 'accepted' status for this job
-            if (userJobApplications[application.jobId] != 'accepted') {
+            // Only update if we don't have a local status for this job, or if the fetched status is more advanced
+            if (!userJobApplications.containsKey(application.jobId)) {
               userJobApplications[application.jobId] = application.applicationStatus;
-              print('DEBUG: Job ${application.jobId} -> Status: ${application.applicationStatus}');
+              print('DEBUG: Job ${application.jobId} -> New Status: ${application.applicationStatus}');
             } else {
-              print('DEBUG: Preserving local accepted status for job ${application.jobId}');
+              // Keep the more advanced status (pending < shortlisted < accepted)
+              String currentStatus = userJobApplications[application.jobId]!;
+              String fetchedStatus = application.applicationStatus;
+              
+              if (_isStatusMoreAdvanced(fetchedStatus, currentStatus)) {
+                userJobApplications[application.jobId] = fetchedStatus;
+                print('DEBUG: Job ${application.jobId} -> Updated to more advanced status: $fetchedStatus');
+              } else {
+                print('DEBUG: Preserving local status for job ${application.jobId}: $currentStatus');
+              }
             }
           }
           print('DEBUG: Updated userJobApplications map: $userJobApplications');
@@ -601,12 +683,55 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
   // Method to check if a specific job has been applied to
   bool hasAppliedToJob(int jobId) {
-    return userJobApplications.containsKey(jobId) && userJobApplications[jobId] == 'accepted';
+    return userJobApplications.containsKey(jobId);
+  }
+
+  // Method to check if one status is more advanced than another
+  bool _isStatusMoreAdvanced(String newStatus, String currentStatus) {
+    // Define status hierarchy: pending < shortlisted < accepted
+    Map<String, int> statusHierarchy = {
+      'pending': 1,
+      'shortlisted': 2,
+      'accepted': 3,
+    };
+    
+    int newLevel = statusHierarchy[newStatus.toLowerCase()] ?? 0;
+    int currentLevel = statusHierarchy[currentStatus.toLowerCase()] ?? 0;
+    
+    return newLevel > currentLevel;
   }
 
   // Method to get application status for a specific job
   String getJobApplicationStatus(int jobId) {
     return userJobApplications[jobId] ?? '';
+  }
+  
+  // Method to update payment status in database
+  Future<void> _updatePaymentStatus(int applicationId, String paymentId, String status) async {
+    try {
+      final response = await http.post(
+        Uri.parse('https://playsmart.co.in/update_payment_status.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'application_id': applicationId,
+          'payment_id': paymentId,
+          'payment_status': status,
+        }),
+      ).timeout(Duration(seconds: 15));
+      
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        if (responseData['success']) {
+          print('DEBUG: Payment status updated successfully: $status');
+        } else {
+          print('DEBUG: Failed to update payment status: ${responseData['message']}');
+        }
+      } else {
+        print('DEBUG: HTTP error updating payment status: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('DEBUG: Error updating payment status: $e');
+    }
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
@@ -622,6 +747,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   void _handleExternalWallet(ExternalWalletResponse response) {
     print('External Wallet: ${response.walletName}');
   }
+  
+
 
   void _showPaymentSuccessStatus(String paymentId) {
     showDialog(
@@ -836,6 +963,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
   void _showJobApplicationModal(Job job) {
     _currentJobApplication = job; // Set current job for tracking
+    
+    // Determine if this is a new job (from new_jobs table) or old job
+    bool isNewJob = job.companyName.isEmpty || job.companyName == 'Company';
+    String jobType = isNewJob ? 'higher_job' : 'higher_job'; // Default to higher_job for old jobs
     
     final TextEditingController nameController = TextEditingController();
     final TextEditingController emailController = TextEditingController();
@@ -1320,15 +1451,74 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     );
   }
 
+  // Test payment gateway method
+  void _testPaymentGateway() {
+    print('DEBUG: Testing payment gateway...');
+    print('DEBUG: Razorpay instance: $_razorpay');
+    
+    // Check if Razorpay is initialized
+    if (_razorpay == null) {
+      print('ERROR: Razorpay is null! Reinitializing...');
+      _razorpay = Razorpay();
+      _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+      _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+      _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    }
+    
+    var testOptions = {
+      'key': 'rzp_live_fgQr0ACWFbL4pN',
+      'amount': 100, // 1 rupee in paise
+      'name': 'PlaySmart Test',
+      'description': 'Payment Gateway Test',
+      'prefill': {
+        'contact': '',
+        'email': '',
+      },
+    };
+
+    print('DEBUG: Test payment options: ${jsonEncode(testOptions)}');
+
+    try {
+      print('DEBUG: Attempting to open test payment...');
+      _razorpay.open(testOptions);
+      print('DEBUG: Test payment opened successfully');
+    } catch (e) {
+      print('ERROR: Failed to open test payment: $e');
+      print('ERROR: Full error details: ${e.toString()}');
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Test payment failed: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
   void _initiatePayment(Job job) {
+    print('DEBUG: Starting payment initiation for job: ${job.id}');
+    print('DEBUG: Razorpay instance: $_razorpay');
+    
+    // Check if Razorpay is initialized
+    if (_razorpay == null) {
+      print('ERROR: Razorpay is null! Reinitializing...');
+      _razorpay = Razorpay();
+      _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+      _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+      _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    }
+    
     // Determine amount based on job package (10LPA threshold)
     final packageValue = double.tryParse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim());
     final isHighPackage = packageValue != null && packageValue >= 10;
     final amountInRupees = isHighPackage ? 2000.0 : 1000.0;
     final amountInPaise = (amountInRupees * 100).toInt();
     
+    print('DEBUG: Package: ${job.package}, Amount: $amountInRupees, Paise: $amountInPaise');
+    
     var options = {
-      'key': 'rzp_live_fgQr0ACWFbL4pN', // Replace with your Razorpay test key
+      'key': 'rzp_live_fgQr0ACWFbL4pN', // Restore original working key
       'amount': amountInPaise, // Amount in paise (₹0.1 = 10 paise, ₹0.2 = 20 paise)
       'name': 'PlaySmart Services',
       'description': 'Job Application Fee for ${job.jobTitle}',
@@ -1341,14 +1531,22 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       }
     };
 
+    print('DEBUG: Payment options: ${jsonEncode(options)}');
+
     try {
+      print('DEBUG: Attempting to open Razorpay...');
       _razorpay.open(options);
+      print('DEBUG: Razorpay opened successfully');
     } catch (e) {
-      print('Error opening Razorpay: $e');
+      print('ERROR: Failed to open Razorpay: $e');
+      print('ERROR: Full error details: ${e.toString()}');
+      
+      // Show detailed error to user
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error opening payment gateway'),
+          content: Text('Payment gateway error: ${e.toString()}'),
           backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
         ),
       );
     }
@@ -1584,6 +1782,43 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                           _buildDetailRow('Profile', applicationData['profile'] ?? 'N/A'),
                           _buildDetailRow('Experience', applicationData['experience'] ?? 'N/A'),
                           _buildDetailRow('Skills', applicationData['skills'] ?? 'N/A'),
+                          _buildDetailRow('District', applicationData['district'] ?? 'N/A'),
+                          _buildDetailRow('Package', job.package),
+                        ],
+                      ),
+                    ),
+                    
+                    SizedBox(height: 24),
+                    
+                    // Status Progress Section
+                    Container(
+                      padding: EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Application Progress',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 20),
+                          
+                          // Progress Steps
+                          _buildProgressStep('Application Submitted', true, 0),
+                          _buildProgressStep('Screening In Progress', 
+                            (applicationData['application_status'] ?? '').toString().toLowerCase() == 'pending', 1),
+                          _buildProgressStep('Interview Scheduled', 
+                            (applicationData['application_status'] ?? '').toString().toLowerCase() == 'shortlisted', 2),
+                          _buildProgressStep('Offer Letter Pending', 
+                            (applicationData['application_status'] ?? '').toString().toLowerCase() == 'accepted', 3),
+                          _buildProgressStep('Hired', 
+                            (applicationData['application_status'] ?? '').toString().toLowerCase() == 'accepted', 4),
                         ],
                       ),
                     ),
@@ -2194,6 +2429,56 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     }
   }
 
+  Future<void> fetchSuccessfulCandidates() async {
+    try {
+      print('DEBUG: Starting to fetch successful candidates...');
+      final candidatesData = await SuccessfulCandidatesController.fetchSuccessfulCandidates();
+      print('DEBUG: Received ${candidatesData.length} successful candidates from API');
+      if (mounted) {
+        setState(() {
+          successfulCandidates = candidatesData;
+        });
+        print('DEBUG: Updated state with ${successfulCandidates.length} successful candidates');
+      }
+      print('DEBUG: Fetched ${successfulCandidates.length} successful candidates successfully');
+    } catch (e) {
+      print('Error fetching successful candidates: $e');
+      if (mounted) {
+        setState(() {
+          successfulCandidates = [];
+        });
+      }
+    }
+  }
+
+  Future<void> fetchNewJobs() async {
+    try {
+      print('DEBUG: Starting to fetch new jobs...');
+      final jobsData = await NewJobsController.fetchNewJobs();
+      print('DEBUG: Received ${jobsData.length} new jobs from API');
+      if (mounted) {
+        setState(() {
+          newJobs = jobsData;
+          newHigherPackageJobs = jobsData.where((job) => job.isHigherJob).toList();
+          newLocalJobs = jobsData.where((job) => job.isLocalJob).toList();
+        });
+        print('DEBUG: Updated state with ${newJobs.length} new jobs');
+        print('DEBUG: Higher package jobs: ${newHigherPackageJobs.length}');
+        print('DEBUG: Local jobs: ${newLocalJobs.length}');
+      }
+      print('DEBUG: Fetched ${newJobs.length} new jobs successfully');
+    } catch (e) {
+      print('Error fetching new jobs: $e');
+      if (mounted) {
+        setState(() {
+          newJobs = [];
+          newHigherPackageJobs = [];
+          newLocalJobs = [];
+        });
+      }
+    }
+  }
+
   Future<void> fetchJobs() async {
     try {
       print('DEBUG: Starting to fetch jobs...');
@@ -2365,6 +2650,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       await fetchUserBalance();
       await fetchContests();
         await fetchJobApplications();
+        await fetchNewJobs();
         await fetchJobs();
       } catch (e) {
         print('Error in refresh timer: $e');
@@ -2372,41 +2658,162 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     });
   }
 
-  void _startAutoScroll() {
-    _autoScrollTimer?.cancel(); // Cancel existing timer if any
-    
-    // Don't start auto-scroll if there are no job applications
-    if (jobApplications.length <= 1) {
-      print('DEBUG: Not enough job applications for auto-scroll (${jobApplications.length} <= 1)');
-      return;
-    }
-    
-    print('DEBUG: Starting marquee auto-scroll with ${jobApplications.length} applications');
-    _autoScrollTimer = Timer.periodic(Duration(milliseconds: 50), (timer) {
-      if (!mounted || jobApplications.length <= 1) {
-        print('DEBUG: Stopping marquee auto-scroll - mounted: $mounted, apps: ${jobApplications.length}');
-        timer.cancel();
-        _autoScrollTimer = null;
-        return;
-      }
-      
-      if (_jobApplicationsScrollController.hasClients) {
-        final maxScroll = _jobApplicationsScrollController.position.maxScrollExtent;
-        final currentScroll = _jobApplicationsScrollController.position.pixels;
-        
-        // Continuous right-to-left marquee scrolling
-        if (currentScroll >= maxScroll) {
-          // Reset to beginning when reaching the end for seamless loop
-          _jobApplicationsScrollController.jumpTo(0);
-        } else {
-          // Smooth continuous scrolling to the left
-          _jobApplicationsScrollController.jumpTo(currentScroll + 1);
-        }
-      } else {
-        print('DEBUG: Scroll controller not ready');
-      }
-    });
-  }
+     void _startAutoScroll() {
+     _autoScrollTimer?.cancel(); // Cancel existing timer if any
+     
+     // Don't start auto-scroll if there are no job applications
+     if (jobApplications.length <= 1) {
+       print('DEBUG: Not enough job applications for auto-scroll (${jobApplications.length} <= 1)');
+       return;
+     }
+     
+     print('DEBUG: Starting marquee auto-scroll with ${jobApplications.length} applications');
+     _autoScrollTimer = Timer.periodic(Duration(milliseconds: 50), (timer) {
+       if (!mounted || jobApplications.length <= 1) {
+         print('DEBUG: Stopping marquee auto-scroll - mounted: $mounted, apps: ${jobApplications.length}');
+         timer.cancel();
+         _autoScrollTimer = null;
+         return;
+       }
+       
+       if (_jobApplicationsScrollController.hasClients) {
+         final maxScroll = _jobApplicationsScrollController.position.maxScrollExtent;
+         final currentScroll = _jobApplicationsScrollController.position.pixels;
+         
+         // Continuous right-to-left marquee scrolling
+         if (currentScroll >= maxScroll) {
+           // Reset to beginning when reaching the end for seamless loop
+           _jobApplicationsScrollController.jumpTo(0);
+         } else {
+           // Smooth continuous scrolling to the left
+           _jobApplicationsScrollController.jumpTo(currentScroll + 1);
+         }
+       } else {
+         print('DEBUG: Scroll controller not ready');
+       }
+     });
+   }
+
+   void _startCompanyLogosAutoScroll() {
+     _companyLogosScrollTimer?.cancel(); // Cancel existing timer if any
+     
+     print('DEBUG: Starting company logos auto-scroll');
+     _companyLogosScrollTimer = Timer.periodic(Duration(milliseconds: 40), (timer) {
+       if (!mounted) {
+         print('DEBUG: Stopping company logos auto-scroll - not mounted');
+         timer.cancel();
+         _companyLogosScrollTimer = null;
+         return;
+       }
+       
+       if (_companyLogosScrollController.hasClients) {
+         final maxScroll = _companyLogosScrollController.position.maxScrollExtent;
+         final currentScroll = _companyLogosScrollController.position.pixels;
+         
+         // Continuous right-to-left scrolling
+         if (currentScroll >= maxScroll) {
+           // Reset to beginning when reaching the end for seamless loop
+           _companyLogosScrollController.jumpTo(0);
+         } else {
+           // Smooth continuous scrolling to the left
+           _companyLogosScrollController.jumpTo(currentScroll + 1.2);
+         }
+       } else {
+         print('DEBUG: Company logos scroll controller not ready');
+       }
+     });
+   }
+
+   void _startHigherPackageJobsAutoScroll() {
+     _higherPackageJobsScrollTimer?.cancel(); // Cancel existing timer if any
+     
+     print('DEBUG: Starting higher package jobs auto-scroll');
+     _higherPackageJobsScrollTimer = Timer.periodic(Duration(milliseconds: 50), (timer) {
+       if (!mounted) {
+         print('DEBUG: Stopping higher package jobs auto-scroll - not mounted');
+         timer.cancel();
+         _higherPackageJobsScrollTimer = null;
+         return;
+       }
+       
+       if (_higherPackageJobsScrollController.hasClients) {
+         final maxScroll = _higherPackageJobsScrollController.position.maxScrollExtent;
+         final currentScroll = _higherPackageJobsScrollController.position.pixels;
+         
+         // Continuous right-to-left scrolling
+         if (currentScroll >= maxScroll) {
+           // Reset to beginning when reaching the end for seamless loop
+           _higherPackageJobsScrollController.jumpTo(0);
+         } else {
+           // Smooth continuous scrolling to the left
+           _higherPackageJobsScrollController.jumpTo(currentScroll + 1.0);
+         }
+       } else {
+         print('DEBUG: Higher package jobs scroll controller not ready');
+       }
+     });
+   }
+
+   void _startLocalJobsAutoScroll() {
+     _localJobsScrollTimer?.cancel(); // Cancel existing timer if any
+     
+     print('DEBUG: Starting local jobs auto-scroll');
+     _localJobsScrollTimer = Timer.periodic(Duration(milliseconds: 50), (timer) {
+       if (!mounted) {
+         print('DEBUG: Stopping local jobs auto-scroll - not mounted');
+         timer.cancel();
+         _localJobsScrollTimer = null;
+         return;
+       }
+       
+       if (_localJobsScrollController.hasClients) {
+         final maxScroll = _localJobsScrollController.position.maxScrollExtent;
+         final currentScroll = _localJobsScrollController.position.pixels;
+         
+         // Continuous right-to-left scrolling
+         if (currentScroll >= maxScroll) {
+           // Reset to beginning when reaching the end for seamless loop
+           _localJobsScrollController.jumpTo(0);
+           return;
+         } else {
+           // Smooth continuous scrolling to the left
+           _localJobsScrollController.jumpTo(currentScroll + 1.0);
+         }
+       } else {
+         print('DEBUG: Local jobs scroll controller not ready');
+       }
+     });
+   }
+
+   void _startSuccessfulCandidatesAutoScroll() {
+     _successfulCandidatesScrollTimer?.cancel(); // Cancel existing timer if any
+     
+     print('DEBUG: Starting successful candidates auto-scroll');
+     _successfulCandidatesScrollTimer = Timer.periodic(Duration(milliseconds: 50), (timer) {
+       if (!mounted) {
+         print('DEBUG: Stopping successful candidates auto-scroll - not mounted');
+         timer.cancel();
+         _successfulCandidatesScrollTimer = null;
+         return;
+       }
+       
+       if (_successfulCandidatesScrollController.hasClients) {
+         final maxScroll = _successfulCandidatesScrollController.position.maxScrollExtent;
+         final currentScroll = _successfulCandidatesScrollController.position.pixels;
+         
+         // Continuous right-to-left scrolling
+         if (currentScroll >= maxScroll) {
+           // Reset to beginning when reaching the end for seamless loop
+           _successfulCandidatesScrollController.jumpTo(0);
+         } else {
+           // Smooth continuous scrolling to the left
+           _successfulCandidatesScrollController.jumpTo(currentScroll + 1.0);
+         }
+       } else {
+         print('DEBUG: Successful candidates scroll controller not ready');
+       }
+     });
+   }
 
   void _restartAutoScroll() {
     print('DEBUG: Restarting marquee auto-scroll');
@@ -2417,6 +2824,16 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         _startAutoScroll();
       } else {
         print('DEBUG: Not restarting marquee auto-scroll - mounted: $mounted, apps: ${jobApplications.length}');
+      }
+    });
+    
+    // Also restart successful candidates auto-scroll
+    Future.delayed(Duration(milliseconds: 500), () {
+      if (mounted && successfulCandidates.length > 1) {
+        print('DEBUG: Restarting successful candidates auto-scroll after delay');
+        _startSuccessfulCandidatesAutoScroll();
+      } else {
+        print('DEBUG: Not restarting successful candidates auto-scroll - mounted: $mounted, candidates: ${successfulCandidates.length}');
       }
     });
   }
@@ -2431,6 +2848,26 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     print('DEBUG: Resuming marquee auto-scroll');
     if (_autoScrollTimer == null) { // Only start if not already running
       _startAutoScroll();
+    }
+  }
+
+  void _pauseAllAutoScroll() {
+    print('DEBUG: Pausing all auto-scroll');
+    _pauseAutoScroll();
+    _companyLogosScrollTimer?.cancel();
+    _companyLogosScrollTimer = null;
+    _successfulCandidatesScrollTimer?.cancel();
+    _successfulCandidatesScrollTimer = null;
+  }
+
+  void _resumeAllAutoScroll() {
+    print('DEBUG: Resuming all auto-scroll');
+    _resumeAutoScroll();
+    if (_companyLogosScrollTimer == null) {
+      _startCompanyLogosAutoScroll();
+    }
+    if (_successfulCandidatesScrollTimer == null) {
+      _startSuccessfulCandidatesAutoScroll();
     }
   }
 
@@ -3000,7 +3437,423 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     );
   }
 
+     Widget _buildCompanyLogosSection() {
+     // List of company logo file names (excluding b1.jpg and logo.jpg)
+     final List<String> companyLogos = [
+       'adani.jpg',
+       'wipro.jpg', 
+       'tcs.jpg',
+       'info.jpg',
+       'Hero.jpg',
+       'airtel.jpg',
+       'apollo.jpg',
+       'assian.jpg',
+       'Bajaj.jpg',
 
+       'batra.jpg',
+       'britannia.jpg',
+       'bsnl.jpg',
+
+       'byjus.jpg',
+
+       'cadbury.jpg',
+       'cap.jpg',
+       'captial.jpg',
+       'colf.jpg',
+       'dabur.jpg',
+       'fiat.jpg',
+       'honda.jpg',
+       'ibm.jpg',
+       'itc.jpg',
+       'jio.jpg',
+       'lg.jpg',
+       'LIFE.jpg',
+       'lux.jpg',
+       'mahindra.jpg',
+       'MRF.jpg',
+       'newholland.jpg',
+       'ola.jpg',
+       'reliance.jpg',
+       'santoor.jpg',
+       'serco.png',
+       'skybags.png',
+       'swiggy.jpg',
+       'tata.jpg',
+       'tatagreen.jpg',
+       'tech.jpg',
+       'uber.jpg',
+       'Videocon.jpg',
+       'Wheels.jpg',
+       'wipro.jpg',
+       'zomato.jpg',
+     ];
+
+     return ListView.builder(
+       controller: _companyLogosScrollController,
+       scrollDirection: Axis.horizontal,
+       physics: NeverScrollableScrollPhysics(), // Disable manual scrolling for auto-scroll effect
+       itemCount: companyLogos.length * 3, // Triple the items for seamless loop
+       itemBuilder: (context, index) {
+         final logoIndex = index % companyLogos.length;
+         final logoPath = companyLogos[logoIndex];
+         
+         return Container(
+           width: 120,
+           margin: EdgeInsets.only(right: 15),
+           decoration: BoxDecoration(
+             color: Colors.white.withOpacity(0.9),
+             borderRadius: BorderRadius.circular(12),
+             boxShadow: [
+               BoxShadow(
+                 color: Colors.black.withOpacity(0.1),
+                 blurRadius: 8,
+                 offset: Offset(0, 3),
+               ),
+             ],
+           ),
+           child: Padding(
+             padding: EdgeInsets.all(12),
+             child: Image.asset(
+               'assets/icon/$logoPath',
+               fit: BoxFit.contain,
+               errorBuilder: (context, error, stackTrace) {
+                 return Container(
+                   decoration: BoxDecoration(
+                     color: Colors.grey[200],
+                     borderRadius: BorderRadius.circular(8),
+                   ),
+                   child: Icon(
+                     Icons.business,
+                     color: Colors.grey[600],
+                     size: 30,
+                   ),
+                 );
+               },
+             ),
+           ),
+         );
+       },
+     );
+   }
+
+   Widget _buildSuccessfulCandidateCard(SuccessfulCandidate candidate) {
+     return Container(
+       decoration: BoxDecoration(
+         color: Colors.white,
+         borderRadius: BorderRadius.circular(16),
+         boxShadow: [
+           BoxShadow(
+             color: Colors.black.withOpacity(0.1),
+             blurRadius: 10,
+             offset: Offset(0, 5),
+           ),
+         ],
+       ),
+      child: Padding(
+        padding: EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Profile Avatar and Company Logo Row
+            Row(
+              children: [
+                // Profile Avatar (Circle)
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.grey[300]!, width: 2),
+                  ),
+                  child: ClipOval(
+                    child: Container(
+                      color: const Color(0xFF6A11CB),
+                      child: Center(
+                        child: Text(
+                          candidate.candidateName.isNotEmpty 
+                              ? candidate.candidateName[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 4),
+                // Company Logo
+                Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2575FC),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Center(
+                    child: Text(
+                      candidate.companyName.isNotEmpty 
+                          ? candidate.companyName[0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 3),
+                // Company Name
+                Expanded(
+                  child: Text(
+                    candidate.companyName,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 4),
+            // Candidate Name
+            Text(
+              candidate.candidateName,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 2),
+            // Job Location
+            Text(
+              candidate.jobLocation,
+              style: GoogleFonts.poppins(
+                fontSize: 8,
+                color: Colors.grey[600],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 2),
+            // Salary
+            Row(
+              children: [
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 9),
+                SizedBox(width: 1),
+                Text(
+                  candidate.salary,
+                  style: GoogleFonts.poppins(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[600],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 2),
+            // Success Badge
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(3),
+                border: Border.all(
+                  color: Colors.green[300]!,
+                ),
+              ),
+              child: Text(
+                '✅ Placed',
+                style: GoogleFonts.poppins(
+                  fontSize: 6,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.green[700],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Job _convertNewJobToJob(NewJob newJob) {
+    return Job(
+      id: newJob.id,
+      companyName: 'Company',
+      companyLogoUrl: '',
+      studentName: '',
+      district: '',
+      package: newJob.salary,
+      profile: newJob.jobPost,
+      jobTitle: newJob.jobPost,
+      location: '',
+      jobType: 'full_time',
+      experienceLevel: newJob.education,
+      skillsRequired: [],
+      jobDescription: 'Education: ${newJob.education}',
+      createdAt: DateTime.now(),
+    );
+  }
+
+  Widget _buildNewJobCard(NewJob job) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Job Type Badge
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: job.isHigherJob ? Colors.blue[50] : Colors.green[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: job.isHigherJob ? Colors.blue[300]! : Colors.green[300]!,
+                ),
+              ),
+              child: Text(
+                job.isHigherJob ? 'Higher Job' : 'Local Job',
+                style: TextStyle(
+                  color: job.isHigherJob ? Colors.blue[700] : Colors.green[700],
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
+            // Job Post
+            Text(
+              job.jobPost,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 8),
+            // Education
+            Row(
+              children: [
+                Icon(Icons.school, color: Colors.blue[600], size: 14),
+                SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    job.education,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      color: Colors.grey[600],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            // Salary
+            Row(
+              children: [
+                Icon(Icons.currency_rupee, color: Colors.green[600], size: 14),
+                SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    job.salary,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green[600],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            Spacer(),
+            // Apply Button or Status
+            if (userJobApplications.containsKey(job.id))
+              GestureDetector(
+                onTap: () => _showJobStatusModal(_convertNewJobToJob(job)),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(userJobApplications[job.id]!).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _getStatusColor(userJobApplications[job.id]!).withOpacity(0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _getStatusIcon(userJobApplications[job.id]!),
+                        size: 12,
+                        color: _getStatusColor(userJobApplications[job.id]!),
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'Status',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: _getStatusColor(userJobApplications[job.id]!),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Container(
+                width: double.infinity,
+                height: 32,
+                child: ElevatedButton(
+                  onPressed: () {
+                    _showJobApplicationModal(_convertNewJobToJob(job));
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: job.isHigherJob ? Colors.blue : Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    'Apply Now',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildJobCard(Job job) {
     return Container(
@@ -3071,17 +3924,28 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                 child: Container(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.1),
+                    color: _getStatusColor(userJobApplications[job.id]!).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    border: Border.all(color: _getStatusColor(userJobApplications[job.id]!).withOpacity(0.3)),
                   ),
-                  child: Text(
-                    'Status',
-                    style: GoogleFonts.poppins(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.blue[700],
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _getStatusIcon(userJobApplications[job.id]!),
+                        size: 12,
+                        color: _getStatusColor(userJobApplications[job.id]!),
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'Status',
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: _getStatusColor(userJobApplications[job.id]!),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               )
@@ -3262,14 +4126,24 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: statusButtonColor.withOpacity(0.3)),
                   ),
-                  child: Text(
-                    statusText,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: statusButtonColor,
-                    ),
-                    textAlign: TextAlign.center,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _getStatusIcon(applicationStatus),
+                        size: 14,
+                        color: statusButtonColor,
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'Status',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: statusButtonColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -3357,24 +4231,40 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                     children: [
                       FadeTransition(
                         opacity: _fadeAnimation,
-                        child: _buildAnimatedIconButton(
-                          icon: Icons.person,
-                          onPressed: () async {
-                            HapticFeedback.selectionClick();
-                            // BULLETPROOF FIX: Check and recover session before showing profile
-                            await _checkSessionStatus();
-                            await _recoverSessionIfNeeded();
-                            
-                            // CRITICAL: Backup session data when profile is accessed
-                            final prefs = await SharedPreferences.getInstance();
-                            final token = prefs.getString('token');
-                            if (token != null) {
-                              await _backupSessionData(token);
-                              print('🔐 DEBUG: ✅ Session data backed up when profile accessed');
-                            }
-                            
-                            await _showProfileWithLogoutOption();
-                          },
+                        child: Row(
+                          children: [
+                            // // Test Payment Button
+                            // Container(
+                            //   margin: EdgeInsets.only(right: 10),
+                            //   child: _buildAnimatedIconButton(
+                            //     icon: Icons.payment,
+                            //     onPressed: () {
+                            //       print('DEBUG: Test payment button pressed');
+                            //       _testPaymentGateway();
+                            //     },
+                            //   ),
+                            // ),
+                            // Profile Button
+                            _buildAnimatedIconButton(
+                              icon: Icons.person,
+                              onPressed: () async {
+                                HapticFeedback.selectionClick();
+                                // BULLETPROOF FIX: Check and recover session before showing profile
+                                await _checkSessionStatus();
+                                await _recoverSessionIfNeeded();
+                                
+                                // CRITICAL: Backup session data when profile is accessed
+                                final prefs = await SharedPreferences.getInstance();
+                                final token = prefs.getString('token');
+                                if (token != null) {
+                                  await _backupSessionData(token);
+                                  print('🔐 DEBUG: ✅ Session data backed up when profile accessed');
+                                }
+                                
+                                await _showProfileWithLogoutOption();
+                              },
+                            ),
+                          ],
                         ),
                       ),
                       FadeTransition(
@@ -3436,41 +4326,41 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
                           Container(
                             height: 140,
-                            child: jobApplications.isNotEmpty 
+                            child: successfulCandidates.isNotEmpty 
                               ? GestureDetector(
                                   onPanStart: (_) {
-                                    print('DEBUG: User interaction detected, pausing marquee auto-scroll');
-                                    _pauseAutoScroll();
+                                    print('DEBUG: User interaction detected, pausing all auto-scroll');
+                                    _pauseAllAutoScroll();
                                   },
                                   onPanEnd: (_) {
-                                    print('DEBUG: User interaction ended, resuming marquee auto-scroll in 2 seconds');
+                                    print('DEBUG: User interaction ended, resuming all auto-scroll in 2 seconds');
                                     Future.delayed(Duration(seconds: 2), () {
                                       if (mounted) {
-                                        print('DEBUG: Resuming marquee auto-scroll after user interaction');
-                                        _resumeAutoScroll();
+                                        print('DEBUG: Resuming all auto-scroll after user interaction');
+                                        _resumeAllAutoScroll();
                                       }
                                     });
                                   },
                                   onTap: () {
                                     // Pause auto-scroll on tap and resume after delay
-                                    _pauseAutoScroll();
+                                    _pauseAllAutoScroll();
                                     Future.delayed(Duration(seconds: 2), () {
                                       if (mounted) {
-                                        _resumeAutoScroll();
+                                        _resumeAllAutoScroll();
                                       }
                                     });
                                   },
                                   child: ListView.builder(
-                                    controller: _jobApplicationsScrollController,
+                                    controller: _successfulCandidatesScrollController,
                                     scrollDirection: Axis.horizontal,
                                     physics: NeverScrollableScrollPhysics(), // Disable manual scrolling for marquee effect
-                                    itemCount: jobApplications.length * 2, // Duplicate items for seamless loop
+                                    itemCount: successfulCandidates.length * 3, // Triple the items for seamless loop
                                     itemBuilder: (context, index) {
-                                      final application = jobApplications[index % jobApplications.length];
+                                      final candidate = successfulCandidates[index % successfulCandidates.length];
                                       return Container(
                                         width: 180,
                                         margin: EdgeInsets.only(right: 15),
-                                        child: _buildJobApplicationCard(application),
+                                        child: _buildSuccessfulCandidateCard(candidate),
                                       );
                                     },
                                   ),
@@ -3480,13 +4370,13 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       Icon(
-                                        Icons.work_outline,
+                                        Icons.people_outline,
                                         color: Colors.white70,
                                         size: 28,
                                       ),
                                       SizedBox(height: 6),
                                       Text(
-                                        'No applications available',
+                                        'No successful candidates yet',
                                         style: GoogleFonts.poppins(
                                           color: Colors.white70,
                                           fontSize: 14,
@@ -3505,7 +4395,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => SuccessfulCandidatesScreen(candidates: jobApplications),
+                                    builder: (context) => SuccessfulCandidatesScreen(),
                                   ),
                                 );
                               },
@@ -3535,17 +4425,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                           SizedBox(height: 12),
                           Container(
                             height: 190,
-                            child: higherPackageJobs.isNotEmpty 
+                            child: newHigherPackageJobs.isNotEmpty 
                               ? ListView.builder(
                                   scrollDirection: Axis.horizontal,
-                                  physics: BouncingScrollPhysics(),
-                                  itemCount: higherPackageJobs.length,
+                                  physics: BouncingScrollPhysics(), // Enable manual scrolling
+                                  itemCount: newHigherPackageJobs.length,
                                   itemBuilder: (context, index) {
-                                    final job = higherPackageJobs[index];
+                                    final job = newHigherPackageJobs[index];
                                     return Container(
                                       width: 180,
                                       margin: EdgeInsets.only(right: 15),
-                                      child: _buildJobCardWithApplyButton(job),
+                                      child: _buildNewJobCard(job),
                                     );
                                   },
                                 )
@@ -3580,7 +4470,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) => AllJobsPage(
-                                      jobs: higherPackageJobs,
+                                      jobs: newHigherPackageJobs.map((job) => _convertNewJobToJob(job)).toList(),
                                       title: 'Higher Package Jobs',
                                       jobType: 'higher_package',
                                     ),
@@ -3612,17 +4502,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                           SizedBox(height: 12),
                           Container(
                             height: 190,
-                            child: localJobs.isNotEmpty 
+                            child: newLocalJobs.isNotEmpty 
                               ? ListView.builder(
                                   scrollDirection: Axis.horizontal,
-                                  physics: BouncingScrollPhysics(),
-                                  itemCount: localJobs.length,
+                                  physics: BouncingScrollPhysics(), // Enable manual scrolling
+                                  itemCount: newLocalJobs.length,
                                   itemBuilder: (context, index) {
-                                    final job = localJobs[index];
+                                    final job = newLocalJobs[index];
                                     return Container(
                                       width: 180,
                                       margin: EdgeInsets.only(right: 15),
-                                      child: _buildJobCardWithApplyButton(job),
+                                      child: _buildNewJobCard(job),
                                     );
                                   },
                                 )
@@ -3648,31 +4538,51 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                                 ),
                           ),
                           
-                          // View All Button for Local Jobs (Outside Container)
-                          SizedBox(height: 15),
-                          Center(
-                            child: ElevatedButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const LocalJobsScreen(),
-                                  ),
-                                );
-                              },
-                              child: Text('View All Local Jobs'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                            ),
-                          ),
-                          
-                          // Contests Section
+                                                     // View All Button for Local Jobs (Outside Container)
+                           SizedBox(height: 15),
+                           Center(
+                             child: ElevatedButton(
+                               onPressed: () {
+                                 Navigator.push(
+                                   context,
+                                   MaterialPageRoute(
+                                     builder: (context) => AllJobsPage(
+                                       jobs: newLocalJobs.map((job) => _convertNewJobToJob(job)).toList(),
+                                       title: 'Local Jobs',
+                                       jobType: 'local_job',
+                                     ),
+                                   ),
+                                 );
+                               },
+                               child: Text('View All Local Jobs'),
+                               style: ElevatedButton.styleFrom(
+                                 backgroundColor: Colors.green,
+                                 foregroundColor: Colors.white,
+                                 padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                 shape: RoundedRectangleBorder(
+                                   borderRadius: BorderRadius.circular(8),
+                                 ),
+                               ),
+                             ),
+                           ),
+                           
+                           // Company Logos Section (New Section)
+                           SizedBox(height: 20),
+                           Text(
+                             'Our Partner Companies',
+                             style: GoogleFonts.poppins(
+                               color: Colors.white,
+                               fontSize: 20,
+                               fontWeight: FontWeight.bold,
+                             ),
+                           ),
+                           SizedBox(height: 12),
+                           Container(
+                             height: 80,
+                             child: _buildCompanyLogosSection(),
+                           ),
+                           
+                           // Contests Section
                           // SizedBox(height: 20),
                           // Text(
                           //   'Contests',
@@ -4251,6 +5161,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       },
     );
   }
+
+
 
   Widget _buildProgressStep(String title, bool isActive, int step) {
     final isCompleted = step <= _getCurrentStep(userJobApplications[_currentJobApplication?.id] ?? 'pending');
@@ -4877,21 +5789,37 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         },
       );
 
+      // Determine if this is a new job (from new_jobs table) or old job
+      bool isNewJob = job.companyName.isEmpty || job.companyName == 'Company';
+      String jobType = 'higher_job'; // Default to higher_job
+      
+      // If it's a new job, determine the type based on the job data
+      if (isNewJob) {
+        // Check if this job exists in our new jobs list
+        NewJob? newJob = newJobs.firstWhere(
+          (nj) => nj.id == job.id,
+          orElse: () => NewJob(
+            id: job.id,
+            jobPost: job.jobTitle,
+            salary: job.package,
+            education: 'Not specified',
+            jobType: 'higher_job',
+            createdAt: DateTime.now().toString(),
+          ),
+        );
+        jobType = newJob.jobType;
+      }
+
       // Prepare data for submission
       final data = {
-        'name': formData['name'] ?? '',
+        'job_id': job.id,
+        'job_type': jobType,
+        'student_name': formData['name'] ?? '',
         'email': formData['email'] ?? '',
         'phone': formData['phone'] ?? '',
-        'education': 'Not specified', // Default value since education field is not in the form
         'experience': formData['experience'] ?? '',
         'skills': formData['skills'] ?? '',
-        'job_id': job.id,
         'referral_code': referralCode.isNotEmpty ? referralCode : '',
-        'photo_path': photoPath ?? '',
-        'resume_path': resumePath ?? '',
-        'company_name': job.companyName,
-        'package': job.package,
-        'profile': job.jobTitle,
         'district': 'Mumbai', // Default location
       };
 
@@ -4899,7 +5827,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
       // Send to backend to store in database
       final response = await http.post(
-        Uri.parse('https://playsmart.co.in/submit_job_application_working.php'),
+        Uri.parse('https://playsmart.co.in/submit_job_application_new.php'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -4925,9 +5853,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           
           // Store application ID for payment
           final applicationId = responseData['data']['application_id'];
-          final paymentId = responseData['data']['payment_id'];
+          final jobType = responseData['data']['job_type'];
           
-          print('DEBUG: Application submitted successfully. ID: $applicationId, Payment ID: $paymentId');
+          print('DEBUG: Application submitted successfully. ID: $applicationId, Job Type: $jobType');
+          
+          // Store the application ID for payment tracking
+          _currentApplicationId = applicationId;
+          
+          // Upload files if they were selected
+          if (photoPath != null && resumePath != null) {
+            await _uploadFilesToServer(applicationId, photoPath, resumePath);
+          }
           
           // Show instructions modal
           _showInstructionsModal(job, referralCode);
@@ -4961,83 +5897,140 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     }
   }
 
-  void _openPaymentGateway(Job job, double amount, String referralCode) async {
+  // Add this new method to upload files
+  Future<void> _uploadFilesToServer(int applicationId, String photoPath, String resumePath) async {
     try {
-      // CRITICAL FIX: Create Razorpay order first to prevent auto-refunds
-      print("🔄 Creating Razorpay order before payment...");
+      // Upload photo
+      if (photoPath.isNotEmpty) {
+        final photoFile = File(photoPath);
+        if (await photoFile.exists()) {
+          final photoBytes = await photoFile.readAsBytes();
+          final photoName = 'photo_${applicationId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          
+          // Save photo to server
+          final photoResponse = await http.post(
+            Uri.parse('https://playsmart.co.in/Admin/uploads/photos/'),
+            headers: {'Content-Type': 'application/octet-stream'},
+            body: photoBytes,
+          );
+          
+          if (photoResponse.statusCode == 200) {
+            print('DEBUG: Photo uploaded successfully');
+          }
+        }
+      }
       
-      // Get form data from the current application
-      String userName = 'User'; // This should come from form
-      String userEmail = 'user@example.com'; // This should come from form
-      String userPhone = ''; // This should come from form
+      // Upload resume
+      if (resumePath.isNotEmpty) {
+        final resumeFile = File(resumePath);
+        if (await resumeFile.exists()) {
+          final resumeBytes = await resumeFile.readAsBytes();
+          final resumeName = 'resume_${applicationId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+          
+          // Save resume to server
+          final resumeResponse = await http.post(
+            Uri.parse('https://playsmart.co.in/Admin/uploads/resumes/'),
+            headers: {'Content-Type': 'application/octet-stream'},
+            body: resumeBytes,
+          );
+          
+          if (resumeResponse.statusCode == 200) {
+            print('DEBUG: Resume uploaded successfully');
+          }
+        }
+      }
       
-      // Create Razorpay order via backend
-      final orderResponse = await http.post(
-        Uri.parse('https://playsmart.co.in/create_razorpay_order.php'),
+      // Update file paths in database
+      final updateResponse = await http.post(
+        Uri.parse('https://playsmart.co.in/upload_files_new.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'job_id': job.id,
-          'amount': amount,
-          'user_email': userEmail,
-          'user_name': userName,
-          'user_phone': userPhone,
+          'application_id': applicationId,
+          'photo_path': 'Admin/uploads/photos/photo_${applicationId}_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          'resume_path': 'Admin/uploads/resumes/resume_${applicationId}_${DateTime.now().millisecondsSinceEpoch}.pdf',
         }),
-      ).timeout(Duration(seconds: 15));
-
-      if (orderResponse.statusCode == 200) {
-        final orderResult = jsonDecode(orderResponse.body);
-        if (orderResult['success']) {
-          final orderId = orderResult['data']['order_id'];
-          print("✅ Razorpay order created successfully: $orderId");
-          
-          // Now open payment gateway with the order ID
-          var options = {
-            'key': 'rzp_live_fgQr0ACWFbL4pN',
-            'amount': (amount * 100).toInt(), // Amount in paise
-            'name': 'PlaySmart Services',
-            'description': 'Job Application Fee for ${job.jobTitle}',
-            'order_id': orderId, // CRITICAL: Use the order ID
-            'prefill': {
-              'contact': userPhone,
-              'email': userEmail,
-              'name': userName,
-            },
-            'external': {
-              'wallets': ['paytm']
-            }
-          };
-          
-          print("🔄 Opening payment gateway with order ID: $orderId");
-          _razorpay.open(options);
-          
-        } else {
-          print("❌ Failed to create Razorpay order: ${orderResult['message']}");
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to create payment order: ${orderResult['message']}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } else {
-        print("❌ HTTP error creating order: ${orderResponse.statusCode}");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to create payment order. Please try again.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      );
+      
+      if (updateResponse.statusCode == 200) {
+        print('DEBUG: File paths updated in database');
       }
       
-          } catch (e) {
-        print("❌ Error in _openPaymentGateway: $e");
+    } catch (e) {
+      print('DEBUG: Error uploading files: $e');
+    }
+  }
+
+  void _openPaymentGateway(Job job, double amount, String referralCode) async {
+    try {
+      print('DEBUG: _openPaymentGateway called with amount: $amount');
+      
+      // Create payment options directly
+      var options = {
+        'key': 'rzp_live_fgQr0ACWFbL4pN',
+        'amount': (amount * 100).toInt(), // Amount in paise
+        'name': 'PlaySmart Services',
+        'description': 'Job Application Fee for ${job.jobTitle}',
+        'prefill': {
+          'contact': '',
+          'email': '',
+        },
+        'external': {
+          'wallets': ['paytm']
+        }
+      };
+      
+      print('DEBUG: Payment options created: ${jsonEncode(options)}');
+      
+      // Create a new Razorpay instance directly here instead of trying to access MainScreen
+      print('DEBUG: Creating new Razorpay instance...');
+      final razorpay = Razorpay();
+      
+      // Set up event handlers
+      razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, (PaymentSuccessResponse response) {
+        print('DEBUG: Payment success: ${response.paymentId}');
+        Navigator.pop(context); // Close the modal
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error opening payment gateway: $e'),
+            content: Text('Payment successful! Payment ID: ${response.paymentId}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Clean up
+        razorpay.clear();
+      });
+      
+      razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, (PaymentFailureResponse response) {
+        print('DEBUG: Payment error: ${response.message}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment failed: ${response.message}'),
             backgroundColor: Colors.red,
           ),
         );
-      }
+        // Clean up
+        razorpay.clear();
+      });
+      
+      razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, (ExternalWalletResponse response) {
+        print('DEBUG: External wallet: ${response.walletName}');
+        // Clean up
+        razorpay.clear();
+      });
+      
+      print('DEBUG: Attempting to open Razorpay...');
+      razorpay.open(options);
+      print('DEBUG: Razorpay opened successfully');
+      
+    } catch (e) {
+      print('ERROR: Error in _openPaymentGateway: $e');
+      print('ERROR: Full error details: ${e.toString()}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error opening payment gateway: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
@@ -6026,12 +7019,12 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
                 width: double.infinity,
                 height: 48,
                                   child: ElevatedButton(
-                    onPressed: agreedToTerms
-                        ? () {
-                            Navigator.pop(context);
-                            _showPaymentOptions(widget.job, amount, _referralCodeController.text);
-                          }
-                        : null,
+                                                onPressed: agreedToTerms
+                                ? () {
+                                    Navigator.pop(context);
+                                    _showPaymentOptions(widget.job, amount, _referralCodeController.text);
+                                  }
+                                : null,
                   child: Text('Proceed to Payment'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: agreedToTerms ? Colors.green : Colors.grey,
@@ -6103,6 +7096,8 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
 
   void _openPaymentGateway(Job job, double amount, String referralCode) async {
     try {
+      print('DEBUG: _openPaymentGateway called with amount: $amount');
+      
       // Create payment options directly
       var options = {
         'key': 'rzp_live_fgQr0ACWFbL4pN',
@@ -6118,21 +7113,51 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
         }
       };
       
-      print('DEBUG: Opening payment gateway with options: $options');
-      // Get the Razorpay instance from the parent widget
-      final mainScreen = context.findAncestorStateOfType<_MainScreenState>();
-      if (mainScreen != null) {
-        mainScreen._razorpay.open(options);
-      } else {
+      print('DEBUG: Payment options created: ${jsonEncode(options)}');
+      
+      // Create a new Razorpay instance directly here instead of trying to access MainScreen
+      print('DEBUG: Creating new Razorpay instance...');
+      final razorpay = Razorpay();
+      
+      // Set up event handlers
+      razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, (PaymentSuccessResponse response) {
+        print('DEBUG: Payment success: ${response.paymentId}');
+        Navigator.pop(context); // Close the modal
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Payment gateway not available - MainScreen not found'),
+            content: Text('Payment successful! Payment ID: ${response.paymentId}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Clean up
+        razorpay.clear();
+      });
+      
+      razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, (PaymentFailureResponse response) {
+        print('DEBUG: Payment error: ${response.message}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment failed: ${response.message}'),
             backgroundColor: Colors.red,
           ),
         );
-      }
+        // Clean up
+        razorpay.clear();
+      });
+      
+      razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, (ExternalWalletResponse response) {
+        print('DEBUG: External wallet: ${response.walletName}');
+        // Clean up
+        razorpay.clear();
+      });
+      
+      print('DEBUG: Attempting to open Razorpay...');
+      razorpay.open(options);
+      print('DEBUG: Razorpay opened successfully');
+      
     } catch (e) {
-      print('DEBUG: Error in _openPaymentGateway: $e');
+      print('ERROR: Error in _openPaymentGateway: $e');
+      print('ERROR: Full error details: ${e.toString()}');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error opening payment gateway: $e'),
@@ -6140,284 +7165,5 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
         ),
       );
     }
-  }
-}
-
-class SuccessfulCandidatesScreen extends StatelessWidget {
-  final List<JobApplication> candidates;
-
-  SuccessfulCandidatesScreen({required this.candidates});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('All Successful Candidates'),
-        backgroundColor: Color(0xFF6A11CB),
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Column(
-          children: [
-            // Header Section
-            Container(
-              padding: EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Text(
-                    'Our Successfully Placed Candidates',
-                    style: GoogleFonts.poppins(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    '${candidates.length} candidates have been successfully placed',
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      color: Colors.white70,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            // Candidates Grid
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                ),
-                child: GridView.builder(
-                  padding: EdgeInsets.all(20),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.85,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 16,
-                  ),
-                  itemCount: candidates.length,
-                  itemBuilder: (context, index) {
-                    final candidate = candidates[index];
-                    return _buildCandidateCard(candidate);
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCandidateCard(JobApplication candidate) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 15,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Profile Photo Section
-          Container(
-            height: 100,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              gradient: LinearGradient(
-                colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Stack(
-              children: [
-                // Background Pattern
-                Positioned(
-                  top: -20,
-                  right: -20,
-                  child: Opacity(
-                    opacity: 0.1,
-                    child: Icon(
-                      Icons.star,
-                      size: 80,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                // Profile Photo
-                Center(
-                  child: Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 10,
-                          offset: Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    child: candidate.photoPath.isNotEmpty
-                        ? ClipOval(
-                            child: Image.network(
-                              candidate.photoPath,
-                              fit: BoxFit.cover,
-                              loadingBuilder: (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.2),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      value: loadingProgress.expectedTotalBytes != null
-                                          ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                                          : null,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                    ),
-                                  ),
-                                );
-                              },
-                              errorBuilder: (context, error, stackTrace) => Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.2),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(Icons.person, size: 30, color: Colors.white),
-                              ),
-                            ),
-                          )
-                        : Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(Icons.person, size: 30, color: Colors.white),
-                          ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Candidate Details
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Name
-                  Text(
-                    candidate.studentName,
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  SizedBox(height: 5),
-                  // Experience
-                  Row(
-                    children: [
-                      Icon(Icons.work, color: Colors.blue[600], size: 14),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          '${candidate.experience}',
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            color: Colors.grey[700],
-                            fontWeight: FontWeight.w500,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 6),
-                  // Skills
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.psychology, color: Colors.green[600], size: 14),
-                      SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          candidate.skills,
-                          style: GoogleFonts.poppins(
-                            fontSize: 8,
-                            color: Colors.grey[600],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Spacer(),
-                  // Location
-                  if (candidate.district.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        Icon(Icons.location_on, color: Colors.red[600], size: 12),
-                        SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            candidate.district,
-                            style: GoogleFonts.poppins(
-                              fontSize: 10,
-                              color: Colors.grey[500],
-                              fontWeight: FontWeight.w500,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
-  String _formatDateForCandidate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
   }
 }

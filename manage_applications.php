@@ -47,11 +47,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_applicant'])) {
     $skills = $_POST['skills'];
     $application_status = $_POST['application_status'];
     
+    // Calculate application fee based on package
+    $application_fee = 1000.00; // Default fee
+    if (strpos($package, 'LPA') !== false) {
+        $packageValue = floatval(preg_replace('/[^0-9.]/', '', $package));
+        if ($packageValue >= 10) {
+            $application_fee = 2000.00; // Higher package jobs
+        }
+    }
+    
+    // Create upload directories if they don't exist
+    $photoDir = 'Admin/uploads/photos/';
+    $resumeDir = 'Admin/uploads/resumes/';
+    
+    if (!is_dir($photoDir)) {
+        mkdir($photoDir, 0755, true);
+    }
+    if (!is_dir($resumeDir)) {
+        mkdir($resumeDir, 0755, true);
+    }
+    
     // Handle photo upload
     $photo_path = '';
     if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
         $photo_name = time() . '_' . $_FILES['photo']['name'];
-        $photo_path = 'uploads/photos/' . $photo_name;
+        $photo_path = $photoDir . $photo_name;
         if (!move_uploaded_file($_FILES['photo']['tmp_name'], $photo_path)) {
             $error = "Failed to upload photo";
         }
@@ -61,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_applicant'])) {
     $resume_path = '';
     if (isset($_FILES['resume']) && $_FILES['resume']['error'] === UPLOAD_ERR_OK) {
         $resume_name = time() . '_' . $_FILES['resume']['name'];
-        $resume_path = 'uploads/resumes/' . $resume_name;
+        $resume_path = $resumeDir . $resume_name;
         if (!move_uploaded_file($_FILES['resume']['tmp_name'], $resume_path)) {
             $error = "Failed to upload resume";
         }
@@ -71,10 +91,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_applicant'])) {
         // Generate a dummy payment ID for manually added applicants
         $payment_id = 'manual_' . time();
         
-        $sql = "INSERT INTO job_applications (job_id, company_name, company_logo, student_name, district, package, profile, photo_path, resume_path, email, phone, experience, skills, payment_id, application_status, applied_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)";
+        $sql = "INSERT INTO job_applications (job_id, job_type, company_name, company_logo, student_name, district, package, profile, photo_path, resume_path, email, phone, experience, skills, payment_id, payment_status, application_fee, application_status, applied_date, is_active) VALUES (?, 'higher_job', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, NOW(), 1)";
         
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("isssssssssssss", $job_id, $company_name, $company_logo, $student_name, $district, $package, $profile, $photo_path, $resume_path, $email, $phone, $experience, $skills, $payment_id, $application_status);
+        $stmt->bind_param("issssssssssssssd", $job_id, $company_name, $company_logo, $student_name, $district, $package, $profile, $photo_path, $resume_path, $email, $phone, $experience, $skills, $payment_id, $application_fee, $application_status);
         
         if ($stmt->execute()) {
             $success = "Applicant added successfully!";
@@ -88,6 +108,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_applicant'])) {
 // Get filter parameters
 $statusFilter = $_GET['status'] ?? 'all';
 $companyFilter = $_GET['company'] ?? '';
+$jobTypeFilter = $_GET['job_type'] ?? '';
+$paymentFilter = $_GET['payment_status'] ?? '';
+$feeFilter = $_GET['fee_range'] ?? ''; // New fee filter
 
 // Build query
 $whereClause = "WHERE ja.is_active = 1";
@@ -106,13 +129,50 @@ if (!empty($companyFilter)) {
     $types .= "s";
 }
 
+if (!empty($jobTypeFilter)) {
+    $whereClause .= " AND ja.job_type = ?";
+    $params[] = $jobTypeFilter;
+    $types .= "s";
+}
+
+if (!empty($paymentFilter)) {
+    $whereClause .= " AND ja.payment_status = ?";
+    $params[] = $paymentFilter;
+    $types .= "s";
+}
+
+// Add fee range filter
+if (!empty($feeFilter)) {
+    switch ($feeFilter) {
+        case '1000':
+            $whereClause .= " AND ja.application_fee = 1000.00";
+            break;
+        case '2000':
+            $whereClause .= " AND ja.application_fee = 2000.00";
+            break;
+        case '1000-2000':
+            $whereClause .= " AND ja.application_fee BETWEEN 1000.00 AND 2000.00";
+            break;
+        case 'above_2000':
+            $whereClause .= " AND ja.application_fee > 2000.00";
+            break;
+    }
+}
+
 // Get applications
 $applications = [];
 try {
     $query = "
-        SELECT ja.*, j.job_title, j.package, j.location
+        SELECT ja.*, 
+               COALESCE(j.job_title, nj.job_post) as job_title,
+               COALESCE(j.package, nj.salary) as package,
+               COALESCE(j.location, 'N/A') as location,
+               ja.job_type,
+               ja.profile,
+               ja.application_fee
         FROM job_applications ja
-        JOIN jobs j ON ja.job_id = j.id
+        LEFT JOIN jobs j ON ja.job_id = j.id AND j.is_active = 1
+        LEFT JOIN new_jobs nj ON ja.job_id = nj.id AND nj.is_active = 1
         $whereClause
         ORDER BY ja.applied_date DESC
     ";
@@ -148,8 +208,13 @@ try {
 // Get jobs for the modal - IMPORTANT: This must be before $conn->close()
 $jobs = [];
 try {
-    // Fetch all active jobs from the jobs table
-    $stmt = $conn->prepare("SELECT id, company_name, job_title, package, location FROM jobs WHERE is_active = 1 ORDER BY company_name, job_title");
+    // Fetch all active jobs from both tables
+    $stmt = $conn->prepare("
+        SELECT id, company_name, job_title, package, location, 'old' as source FROM jobs WHERE is_active = 1 
+        UNION ALL
+        SELECT id, 'Company' as company_name, job_post as job_title, salary as package, 'N/A' as location, 'new' as source FROM new_jobs WHERE is_active = 1 
+        ORDER BY company_name, job_title
+    ");
     $stmt->execute();
     $result = $stmt->get_result();
     
@@ -1007,11 +1072,11 @@ $conn->close();
                             <div class="filter-group">
                                 <label for="status">Status</label>
                                 <select name="status" id="status">
-                                    <option value="all" <?php echo $statusFilter === 'all' ? 'selected' : ''; ?>>All Statuses</option>
-                                    <option value="pending" <?php echo $statusFilter === 'pending' ? 'selected' : ''; ?>>Pending</option>
-                                    <option value="shortlisted" <?php echo $statusFilter === 'shortlisted' ? 'selected' : ''; ?>>Shortlisted</option>
-                                    <option value="approved" <?php echo $statusFilter === 'approved' ? 'selected' : ''; ?>>Approved</option>
-                                    <option value="rejected" <?php echo $statusFilter === 'rejected' ? 'selected' : ''; ?>>Rejected</option>
+                                    <option value="all" style="color:black;" <?php echo $statusFilter === 'all' ? 'selected' : ''; ?>>All Statuses</option>
+                                    <option value="pending" style="color:black;" <?php echo $statusFilter === 'pending' ? 'selected' : ''; ?>>Pending</option>
+                                    <option value="shortlisted" style="color:black;" <?php echo $statusFilter === 'shortlisted' ? 'selected' : ''; ?>>Shortlisted</option>
+                                    <option value="approved" style="color:black;" <?php echo $statusFilter === 'approved' ? 'selected' : ''; ?>>Approved</option>
+                                    <option value="rejected" style="color:black;" <?php echo $statusFilter === 'rejected' ? 'selected' : ''; ?>>Rejected</option>
                                 </select>
                             </div>
                             <div class="filter-group">
@@ -1023,6 +1088,34 @@ $conn->close();
                                             <?php echo htmlspecialchars($company); ?>
                                         </option>
                                     <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="job_type">Job Type</label>
+                                <select name="job_type" id="job_type">
+                                    <option style="color:black;" value="">All Types</option>
+                                    <option style="color:black;" value="higher_job" <?php echo ($_GET['job_type'] ?? '') === 'higher_job' ? 'selected' : ''; ?>>Higher Job</option>
+                                    <option style="color:black;" value="local_job" <?php echo ($_GET['job_type'] ?? '') === 'local_job' ? 'selected' : ''; ?>>Local Job</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label for="payment_status">Payment Status</label>
+                                <select name="payment_status" id="payment_status">
+                                    <option style="color:black;" value="">All Payments</option>
+                                    <option style="color:black;" value="pending" <?php echo ($_GET['payment_status'] ?? '') === 'pending' ? 'selected' : ''; ?>>Payment Pending</option>
+                                    <option style="color:black;" value="completed" <?php echo ($_GET['payment_status'] ?? '') === 'completed' ? 'selected' : ''; ?>>Payment Completed</option>
+                                    <option style="color:black;" value="failed" <?php echo ($_GET['payment_status'] ?? '') === 'failed' ? 'selected' : ''; ?>>Payment Failed</option>
+                                </select>
+                            </div>
+                            <!-- New Fee Range Filter -->
+                            <div class="filter-group">
+                                <label for="fee_range">Application Fee</label>
+                                <select name="fee_range" id="fee_range">
+                                    <option style="color:black;" value="">All Fees</option>
+                                    <option style="color:black;" value="1000" <?php echo ($_GET['fee_range'] ?? '') === '1000' ? 'selected' : ''; ?>>₹1000 (Local Jobs)</option>
+                                    <option style="color:black;" value="2000" <?php echo ($_GET['fee_range'] ?? '') === '2000' ? 'selected' : ''; ?>>₹2000 (Higher Jobs)</option>
+                                    <option style="color:black;" value="1000-2000" <?php echo ($_GET['fee_range'] ?? '') === '1000-2000' ? 'selected' : ''; ?>>₹1000 - ₹2000</option>
+                                    <option style="color:black;" value="above_2000" <?php echo ($_GET['fee_range'] ?? '') === 'above_2000' ? 'selected' : ''; ?>>Above ₹2000</option>
                                 </select>
                             </div>
                             <div class="filter-group">
@@ -1066,6 +1159,28 @@ $conn->close();
                                         
                                         <div class="job-details">
                                             <div class="job-detail">
+                                                <span>Job Type:</span>
+                                                <span style="text-transform: capitalize; color: <?php echo $app['job_type'] === 'higher_job' ? '#4CAF50' : '#FF9800'; ?>;">
+                                                    <?php echo str_replace('_', ' ', ucfirst($app['job_type'] ?? 'higher_job')); ?>
+                                                </span>
+                                            </div>
+                                            <div class="job-detail">
+                                                <span>Payment Status:</span>
+                                                <span style="text-transform: capitalize; color: <?php 
+                                                    echo $app['payment_status'] === 'completed' ? '#4CAF50' : 
+                                                         ($app['payment_status'] === 'pending' ? '#FF9800' : '#F44336'); 
+                                                ?>;">
+                                                    <?php echo str_replace('_', ' ', ucfirst($app['payment_status'] ?? 'pending')); ?>
+                                                </span>
+                                            </div>
+                                            <!-- New Application Fee Display -->
+                                            <div class="job-detail">
+                                                <span>Application Fee:</span>
+                                                <span style="color: #FFC107; font-weight: bold;">
+                                                    ₹<?php echo number_format($app['application_fee'] ?? 0, 2); ?>
+                                                </span>
+                                            </div>
+                                            <div class="job-detail">
                                                 <span>Job Title:</span>
                                                 <span><?php echo htmlspecialchars($app['job_title']); ?></span>
                                             </div>
@@ -1078,8 +1193,8 @@ $conn->close();
                                                 <span><?php echo htmlspecialchars($app['location']); ?></span>
                                             </div>
                                             <div class="job-detail">
-                                                <span>District:</span>
-                                                <span><?php echo htmlspecialchars($app['district']); ?></span>
+                                                <span>Profile:</span>
+                                                <span><?php echo htmlspecialchars($app['profile']); ?></span>
                                             </div>
                                             <div class="job-detail">
                                                 <span>Email:</span>
@@ -1101,15 +1216,22 @@ $conn->close();
                                         
                                         <div class="application-actions">
                                             <div style="margin-bottom: 10px;">
-                                                <?php if (!empty($app['photo_path'])): ?>
+                                                <?php if (!empty($app['photo_path']) && file_exists($app['photo_path'])): ?>
                                                     <a href="<?php echo htmlspecialchars($app['photo_path']); ?>" target="_blank" class="btn secondary-btn" style="margin-right: 8px;">
                                                         <i class="fas fa-image"></i> View Photo
                                                     </a>
                                                 <?php endif; ?>
-                                                <?php if (!empty($app['resume_path'])): ?>
+                                                <?php if (!empty($app['resume_path']) && file_exists($app['resume_path'])): ?>
                                                     <a href="<?php echo htmlspecialchars($app['resume_path']); ?>" target="_blank" class="btn secondary-btn">
                                                         <i class="fas fa-file-pdf"></i> View Resume
                                                     </a>
+                                                <?php endif; ?>
+                                                
+                                                <!-- Show upload status if no files -->
+                                                <?php if (empty($app['photo_path']) && empty($app['resume_path'])): ?>
+                                                    <span style="color: rgba(255,255,255,0.6); font-size: 12px;">
+                                                        <i class="fas fa-info-circle"></i> No files uploaded
+                                                    </span>
                                                 <?php endif; ?>
                                             </div>
                                             <form method="POST" style="display: inline;" name="update_status">
@@ -1152,7 +1274,12 @@ $conn->close();
                             <?php if (!empty($jobs)): ?>
                                 <?php foreach ($jobs as $job): ?>
                                     <option value="<?php echo $job['id']; ?>">
-                                        <?php echo htmlspecialchars($job['company_name'] . ' - ' . $job['job_title']); ?>
+                                        <?php 
+                                        $jobText = $job['source'] === 'new' 
+                                            ? 'New Job: ' . htmlspecialchars($job['job_title']) . ' (' . htmlspecialchars($job['package']) . ')'
+                                            : htmlspecialchars($job['company_name'] . ' - ' . $job['job_title']);
+                                        echo $jobText;
+                                        ?>
                                     </option>
                                 <?php endforeach; ?>
                             <?php else: ?>
@@ -1221,14 +1348,20 @@ $conn->close();
                     </div>
                     
                     <div class="form-group">
-                        <label for="application_status">Application Status *</label>
-                        <select name="application_status" id="application_status" required>
-                            <option value="pending">Pending</option>
-                            <option value="shortlisted">Shortlisted</option>
-                            <option value="accepted">Accepted</option>
-                            <option value="rejected">Rejected</option>
-                        </select>
+                        <label for="application_fee">Application Fee (₹)</label>
+                        <input type="number" name="application_fee" id="application_fee" step="0.01" min="0" value="1000.00" required>
+                        <small style="color: rgba(255,255,255,0.7);">Fee will be auto-calculated based on package</small>
                     </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="application_status">Application Status *</label>
+                    <select name="application_status" id="application_status" required>
+                        <option value="pending">Pending</option>
+                        <option value="shortlisted">Shortlisted</option>
+                        <option value="accepted">Accepted</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
                 </div>
                 
                 <div class="form-group">
@@ -1387,6 +1520,26 @@ $conn->close();
                             smallText.style.color = '#4CAF50';
                         }
                     }
+                });
+            }
+
+            // Auto-calculate application fee based on package
+            const packageInput = document.getElementById('package');
+            const feeInput = document.getElementById('application_fee');
+
+            if (packageInput && feeInput) {
+                packageInput.addEventListener('input', function() {
+                    const packageValue = this.value;
+                    let fee = 1000.00; // Default fee for local jobs
+                    
+                    if (packageValue.includes('LPA')) {
+                        const numericValue = parseFloat(packageValue.replace(/[^0-9.]/g, ''));
+                        if (numericValue >= 10) {
+                            fee = 2000.00; // Higher package jobs
+                        }
+                    }
+                    
+                    feeInput.value = fee.toFixed(2);
                 });
             }
 

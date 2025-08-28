@@ -3,6 +3,30 @@
 // Update these values according to your server setup
 
 // Database credentials for your hosting server
+$host = 'localhost';
+$username = 'u968643667_playsmart'; // Your actual database username from logs
+$password = 'your_actual_password'; // Replace with your actual database password
+$database = 'u968643667_playsmart'; // Your actual database name from logs
+
+// Create connection
+$conn = new mysqli($host, $username, $password, $database);
+
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+// Set charset to utf8mb4
+$conn->set_charset("utf8mb4");
+
+// Set timezone
+$conn->query("SET time_zone = '+05:30'");
+
+// Enable error reporting for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Database credentials for your hosting server (keeping for backward compatibility)
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'u968643667_playsmart'); // Your actual database name from logs
 define('DB_USERNAME', 'u968643667_playsmart'); // Your actual database username from logs

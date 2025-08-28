@@ -385,7 +385,7 @@ try {
     $stmt = $pdo->prepare("
         SELECT id, student_name, email, phone, education, experience, 
                skills, referral_code, photo_path, resume_path, company_name, 
-               package, profile, district, applied_date, application_status
+               package, profile, district, applied_date, application_status, application_fee
         FROM job_applications 
         WHERE job_id = ? AND email = ? 
         ORDER BY applied_date DESC 
@@ -398,6 +398,7 @@ try {
     if ($existingApplication) {
         // Use existing application record
         $applicationId = $existingApplication['id'];
+        $applicationFee = $existingApplication['application_fee'];
         writeLog("✅ Found existing application record with ID: $applicationId");
         writeLog("Application details: " . print_r($existingApplication, true));
         
@@ -420,8 +421,8 @@ try {
             INSERT INTO job_applications (
                 job_id, student_name, email, phone, education, experience, 
                 skills, referral_code, photo_path, resume_path, company_name, 
-                package, profile, district, applied_date, application_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'pending')
+                package, profile, district, applied_date, application_status, application_fee
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'pending', 0)
         ");
         
         // Use provided email or default
@@ -438,6 +439,7 @@ try {
         $stmt->execute([
             $jobId, $studentName, $email, $phone, $education, $experience,
             $skills, $referralCode, $photoPath, $resumePath, $job['company_name'],
+            $job['package'], $job['job_title'], $job['location'] ?? 'Mumbai', 
             $job['package'], $job['job_title'], $job['location'] ?? 'Mumbai', 
         ]);
         

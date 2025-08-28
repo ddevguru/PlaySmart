@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'Models/job_application.dart';
+import 'Models/successful_candidate.dart';
 import 'controller/successful_candidates_controller.dart';
 
 class SuccessfulCandidatesScreen extends StatefulWidget {
@@ -11,7 +11,7 @@ class SuccessfulCandidatesScreen extends StatefulWidget {
 }
 
 class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen> {
-  List<JobApplication> _candidates = [];
+  List<SuccessfulCandidate> _candidates = [];
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -145,7 +145,7 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
             ),
             SizedBox(height: 8),
             Text(
-              'Candidates will appear here once they are accepted',
+              'Candidates will appear here once they are added',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
@@ -167,7 +167,7 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
     );
   }
 
-  Widget _buildCandidateCard(JobApplication candidate) {
+  Widget _buildCandidateCard(SuccessfulCandidate candidate) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 4,
@@ -179,11 +179,11 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with photo and basic info
+            // Header with avatar and basic info
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Candidate Photo
+                // Candidate Avatar
                 Container(
                   width: 80,
                   height: 80,
@@ -196,35 +196,21 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(38),
-                    child: candidate.photoUrl != null && candidate.photoUrl!.isNotEmpty
-                        ? CachedNetworkImage(
-                            imageUrl: candidate.photoUrl!,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => Container(
-                              color: Colors.grey[200],
-                              child: const Icon(
-                                Icons.person,
-                                size: 40,
-                                color: Colors.grey,
-                              ),
-                            ),
-                            errorWidget: (context, url, error) => Container(
-                              color: Colors.grey[200],
-                              child: const Icon(
-                                Icons.person,
-                                size: 40,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          )
-                        : Container(
-                            color: Colors.grey[200],
-                            child: const Icon(
-                              Icons.person,
-                              size: 40,
-                              color: Colors.grey,
-                            ),
+                    child: Container(
+                      color: const Color(0xFF6A11CB),
+                      child: Center(
+                        child: Text(
+                          candidate.candidateName.isNotEmpty 
+                              ? candidate.candidateName[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
                           ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -235,7 +221,7 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        candidate.studentName ?? 'Unknown',
+                        candidate.candidateName,
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -244,7 +230,7 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        candidate.profile ?? 'Profile not specified',
+                        candidate.companyName,
                         style: const TextStyle(
                           fontSize: 16,
                           color: Colors.grey,
@@ -278,36 +264,32 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
             Row(
               children: [
                 // Company Logo
-                if (candidate.companyLogoUrl != null && candidate.companyLogoUrl!.isNotEmpty)
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: CachedNetworkImage(
-                        imageUrl: candidate.companyLogoUrl!,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                          color: Colors.grey[200],
-                          child: const Icon(Icons.business, size: 20),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          color: Colors.grey[200],
-                          child: const Icon(Icons.business, size: 20),
-                        ),
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    color: const Color(0xFF2575FC),
+                  ),
+                  child: Center(
+                    child: Text(
+                      candidate.companyName.isNotEmpty 
+                          ? candidate.companyName[0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
+                ),
                 const SizedBox(width: 12),
                 
                 // Company Name
                 Expanded(
                   child: Text(
-                    candidate.companyName ?? 'Company not specified',
+                    candidate.companyName,
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -324,77 +306,33 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
             
             const SizedBox(height: 16),
             
-            // Skills Section
-            if (candidate.skills != null && candidate.skills!.isNotEmpty)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Skills',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF1E3A8A),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: candidate.skills!
-                        .split(',')
-                        .map((skill) => skill.trim())
-                        .where((skill) => skill.isNotEmpty)
-                        .map((skill) => Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.blue[50],
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: Colors.blue[200]!),
-                              ),
-                              child: Text(
-                                skill,
-                                style: TextStyle(
-                                  color: Colors.blue[700],
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                ],
-              ),
-            
-            const SizedBox(height: 16),
-            
             // Applied Date
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Applied: ${candidate.appliedDate != null ? '${candidate.appliedDate.day}/${candidate.appliedDate.month}/${candidate.appliedDate.year}' : 'Date not specified'}',
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
+                // Text(
+                //   'Added: ${_formatDate(candidate.createdAt)}',
+                //   style: const TextStyle(
+                //     color: Colors.grey,
+                //     fontSize: 12,
+                //   ),
+                // ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.green[200]!),
+                  ),
+                  child: Text(
+                    candidate.salary,
+                    style: TextStyle(
+                      color: Colors.green[700],
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-                if (candidate.package != null && candidate.package!.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.green[50],
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.green[200]!),
-                    ),
-                    child: Text(
-                      candidate.package!,
-                      style: TextStyle(
-                        color: Colors.green[700],
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
               ],
             ),
           ],
@@ -403,7 +341,7 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
     );
   }
 
-  Widget _buildDetailsGrid(JobApplication candidate) {
+  Widget _buildDetailsGrid(SuccessfulCandidate candidate) {
     return Column(
       children: [
         Row(
@@ -412,14 +350,14 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
               child: _buildDetailItem(
                 icon: Icons.location_on,
                 label: 'Location',
-                value: candidate.district ?? 'Not specified',
+                value: candidate.jobLocation,
               ),
             ),
             Expanded(
               child: _buildDetailItem(
                 icon: Icons.work,
-                label: 'Experience',
-                value: SuccessfulCandidatesController.formatExperience(candidate.experience),
+                label: 'Company',
+                value: candidate.companyName,
               ),
             ),
           ],
@@ -429,16 +367,16 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
           children: [
             Expanded(
               child: _buildDetailItem(
-                icon: Icons.email,
-                label: 'Email',
-                value: candidate.email ?? 'Not specified',
+                icon: Icons.person,
+                label: 'Candidate',
+                value: candidate.candidateName,
               ),
             ),
             Expanded(
               child: _buildDetailItem(
-                icon: Icons.phone,
-                label: 'Phone',
-                value: candidate.phone ?? 'Not specified',
+                icon: Icons.attach_money,
+                label: 'Salary',
+                value: candidate.salary,
               ),
             ),
           ],
@@ -485,5 +423,14 @@ class _SuccessfulCandidatesScreenState extends State<SuccessfulCandidatesScreen>
         ),
       ],
     );
+  }
+
+  String _formatDate(String dateString) {
+    try {
+      final date = DateTime.parse(dateString);
+      return '${date.day}/${date.month}/${date.year}';
+    } catch (e) {
+      return 'Date not specified';
+    }
   }
 } 
