@@ -2,7 +2,7 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     exit(0);
@@ -22,8 +22,45 @@ try {
     
     // Check database connection
     if ($conn->connect_error) {
-        throw new Exception('Database connection failed: ' . $conn->connect_error);
+        throw new Exception('Database connection failed: ' . $conn->error);
     }
+    
+    // Get authorization header
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? '';
+    
+    // Extract token from "Bearer <token>" format
+    $token = '';
+    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        $token = $matches[1];
+    }
+    
+    if (empty($token)) {
+        throw new Exception('Authorization token is required');
+    }
+    
+    // Verify token and get user ID directly from users table
+    $userStmt = $conn->prepare("
+        SELECT id, email 
+        FROM users 
+        WHERE session_token = ? AND status = 'online'
+    ");
+    if (!$userStmt) {
+        throw new Exception('Prepare error for user verification: ' . $conn->error);
+    }
+    
+    $userStmt->bind_param("s", $token);
+    $userStmt->execute();
+    $userResult = $userStmt->get_result();
+    
+    if ($userResult->num_rows === 0) {
+        throw new Exception('Invalid or expired token');
+    }
+    
+    $user = $userResult->fetch_assoc();
+    $userId = $user['id'];
+    $userEmail = $user['email'];
+    $userStmt->close();
     
     // Get POST data
     $input = json_decode(file_get_contents('php://input'), true);
@@ -55,13 +92,18 @@ try {
         throw new Exception('All required fields must be filled');
     }
     
+    // Verify email matches authenticated user
+    if ($email !== $userEmail) {
+        throw new Exception('Email does not match authenticated user');
+    }
+    
     // Check if user already applied for this job
-    $checkStmt = $conn->prepare("SELECT id FROM job_applications WHERE job_id = ? AND email = ? AND is_active = 1");
+    $checkStmt = $conn->prepare("SELECT id FROM job_applications WHERE job_id = ? AND user_id = ? AND is_active = 1");
     if (!$checkStmt) {
         throw new Exception('Prepare error for duplicate check: ' . $conn->error);
     }
     
-    $checkStmt->bind_param("is", $jobId, $email);
+    $checkStmt->bind_param("ii", $jobId, $userId);
     $checkStmt->execute();
     $checkResult = $checkStmt->get_result();
     
@@ -135,22 +177,24 @@ try {
     // Ensure all variables are properly defined before bind_param
     $companyLogo = ''; // Empty string for company logo
     
-    // Insert application with calculated fee
+    // Insert application with calculated fee and user_id
     $insertStmt = $conn->prepare("
         INSERT INTO job_applications (
-            job_id, job_type, company_name, company_logo, student_name, 
+            user_id, job_id, job_type, company_name, company_logo, student_name, 
             district, package, profile, email, phone, experience, 
             skills, referral_code, application_fee, payment_status, 
-            application_status, applied_date, is_active, application_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', NOW(), 1, '1.0')
+            application_status, applied_date, is_active, application_version,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', NOW(), 1, '1.0', NOW(), NOW())
     ");
     
     if (!$insertStmt) {
         throw new Exception('Prepare error for insert: ' . $conn->error);
     }
     
-    // Bind parameters with properly defined variables
-    $insertStmt->bind_param("issssssssssssd", 
+    // Bind parameters with properly defined variables including user_id
+    $insertStmt->bind_param("iissssssssssssd", 
+        $userId,          // user_id (NEW)
         $jobId,           // job_id
         $jobType,         // job_type
         $companyName,     // company_name
@@ -175,7 +219,7 @@ try {
     $insertStmt->close();
     
     // Log successful insertion
-    error_log('Job Application inserted successfully. ID: ' . $applicationId);
+    error_log('Job Application inserted successfully. ID: ' . $applicationId . ', User ID: ' . $userId);
     
     // Return success response with application details
     echo json_encode([
@@ -183,6 +227,7 @@ try {
         'message' => 'Application submitted successfully!',
         'data' => [
             'application_id' => $applicationId,
+            'user_id' => $userId,
             'job_type' => $jobType,
             'application_fee' => $applicationFee,
             'package' => $package,

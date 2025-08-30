@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS `razorpay_orders` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `order_id` varchar(255) NOT NULL COMMENT 'Razorpay order ID',
+  `user_id` int(11) NOT NULL COMMENT 'User ID who created the order',
   `job_id` int(11) NOT NULL COMMENT 'Job ID for which order was created',
   `amount` decimal(10,2) NOT NULL COMMENT 'Order amount in INR',
   `currency` varchar(10) NOT NULL DEFAULT 'INR' COMMENT 'Currency code',
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS `razorpay_orders` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
   PRIMARY KEY (`id`),
   UNIQUE KEY `order_id` (`order_id`),
+  KEY `user_id` (`user_id`),
   KEY `job_id` (`job_id`),
   KEY `status` (`status`),
   KEY `created_at` (`created_at`)

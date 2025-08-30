@@ -136,7 +136,7 @@ if (!empty($jobTypeFilter)) {
 }
 
 if (!empty($paymentFilter)) {
-    $whereClause .= " AND ja.payment_status = ?";
+    $whereClause .= " AND COALESCE(pt.payment_status, ja.payment_status) = ?";
     $params[] = $paymentFilter;
     $types .= "s";
 }
@@ -159,6 +159,19 @@ if (!empty($feeFilter)) {
     }
 }
 
+// Add payment tracking filter
+$hasPaymentFilter = $_GET['has_payment'] ?? '';
+if (!empty($hasPaymentFilter)) {
+    switch ($hasPaymentFilter) {
+        case 'with_payment':
+            $whereClause .= " AND pt.id IS NOT NULL";
+            break;
+        case 'without_payment':
+            $whereClause .= " AND pt.id IS NULL";
+            break;
+    }
+}
+
 // Get applications
 $applications = [];
 try {
@@ -169,10 +182,15 @@ try {
                COALESCE(j.location, 'N/A') as location,
                ja.job_type,
                ja.profile,
-               ja.application_fee
+               ja.application_fee,
+               COALESCE(pt.payment_status, ja.payment_status) as payment_status,
+               pt.amount as payment_amount,
+               pt.razorpay_payment_id,
+               pt.razorpay_order_id
         FROM job_applications ja
         LEFT JOIN jobs j ON ja.job_id = j.id AND j.is_active = 1
         LEFT JOIN new_jobs nj ON ja.job_id = nj.id AND nj.is_active = 1
+        LEFT JOIN payment_tracking pt ON ja.user_id = pt.user_id AND ja.job_id = pt.job_id
         $whereClause
         ORDER BY ja.applied_date DESC
     ";
@@ -203,6 +221,32 @@ try {
     }
 } catch (Exception $e) {
     // Ignore error for companies filter
+}
+
+// Get payment statistics from payment_tracking table
+$paymentStats = [];
+try {
+    $statsQuery = "
+        SELECT 
+            payment_status,
+            COUNT(*) as count,
+            SUM(amount) as total_amount
+        FROM payment_tracking 
+        GROUP BY payment_status
+    ";
+    $statsStmt = $conn->prepare($statsQuery);
+    $statsStmt->execute();
+    $statsResult = $statsStmt->get_result();
+    
+    while ($stat = $statsResult->fetch_assoc()) {
+        $paymentStats[$stat['payment_status']] = [
+            'count' => $stat['count'],
+            'total_amount' => $stat['total_amount']
+        ];
+    }
+} catch (Exception $e) {
+    error_log("Error fetching payment stats: " . $e->getMessage());
+    // Ignore stats error
 }
 
 // Get jobs for the modal - IMPORTANT: This must be before $conn->close()
@@ -1059,6 +1103,72 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
+                <!-- Payment Statistics Summary -->
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-header">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h2><i class="fas fa-chart-pie"></i> Payment Statistics</h2>
+                                <p>Overview of payment statuses from payment_tracking table</p>
+                            </div>
+                            <button class="btn secondary-btn" onclick="refreshPaymentStats()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+
+                        
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                            <div style="background: rgba(76, 175, 80, 0.2); padding: 15px; border-radius: 8px; border-left: 4px solid #4CAF50;">
+                                <h3 style="color: #4CAF50; margin: 0 0 10px 0;">Completed</h3>
+                                <p style="margin: 0; font-size: 24px; font-weight: bold;">
+                                    <?php echo $paymentStats['completed']['count'] ?? 0; ?>
+                                </p>
+                                <small style="color: rgba(255,255,255,0.7);">
+                                    ₹<?php echo number_format($paymentStats['completed']['total_amount'] ?? 0, 2); ?>
+                                </small>
+                            </div>
+                            
+                            <div style="background: rgba(255, 193, 7, 0.2); padding: 15px; border-radius: 8px; border-left: 4px solid #FFC107;">
+                                <h3 style="color: #FFC107; margin: 0 0 10px 0;">Pending</h3>
+                                <p style="margin: 0; font-size: 24px; font-weight: bold;">
+                                    <?php echo $paymentStats['pending']['count'] ?? 0; ?>
+                                </p>
+                                <small style="color: rgba(255,255,255,0.7);">
+                                    ₹<?php echo number_format($paymentStats['pending']['total_amount'] ?? 0, 2); ?>
+                                </small>
+                            </div>
+                            
+                            <div style="background: rgba(244, 67, 54, 0.2); padding: 15px; border-radius: 8px; border-left: 4px solid #F44336;">
+                                <h3 style="color: #F44336; margin: 0 0 10px 0;">Failed</h3>
+                                <p style="margin: 0; font-size: 24px; font-weight: bold;">
+                                    <?php echo $paymentStats['failed']['count'] ?? 0; ?>
+                                </p>
+                                <small style="color: rgba(255,255,255,0.7);">
+                                    ₹<?php echo number_format($paymentStats['failed']['total_amount'] ?? 0, 2); ?>
+                                </small>
+                            </div>
+                            
+                            <div style="background: rgba(33, 150, 243, 0.2); padding: 15px; border-radius: 8px; border-left: 4px solid #2196F3;">
+                                <h3 style="color: #2196F3; margin: 0 0 10px 0;">Total</h3>
+                                <p style="margin: 0; font-size: 24px; font-weight: bold;">
+                                    <?php 
+                                    $totalCount = array_sum(array_column($paymentStats, 'count'));
+                                    echo $totalCount;
+                                    ?>
+                                </p>
+                                <small style="color: rgba(255,255,255,0.7);">
+                                    ₹<?php 
+                                    $totalAmount = array_sum(array_column($paymentStats, 'total_amount'));
+                                    echo number_format($totalAmount, 2);
+                                    ?>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header">
                         <h2>Job Applications</h2>
@@ -1118,6 +1228,15 @@ $conn->close();
                                     <option style="color:black;" value="above_2000" <?php echo ($_GET['fee_range'] ?? '') === 'above_2000' ? 'selected' : ''; ?>>Above ₹2000</option>
                                 </select>
                             </div>
+                            
+                            <div class="filter-group">
+                                <label for="has_payment">Payment Tracking</label>
+                                <select name="has_payment" id="has_payment">
+                                    <option style="color:black;" value="">All Applications</option>
+                                    <option style="color:black;" value="with_payment" <?php echo ($_GET['has_payment'] ?? '') === 'with_payment' ? 'selected' : ''; ?>>With Payment Records</option>
+                                    <option style="color:black;" value="without_payment" <?php echo ($_GET['has_payment'] ?? '') === 'without_payment' ? 'selected' : ''; ?>>Without Payment Records</option>
+                                </select>
+                            </div>
                             <div class="filter-group">
                                 <label>&nbsp;</label>
                                 <button type="submit" class="btn primary-btn">
@@ -1167,12 +1286,42 @@ $conn->close();
                                             <div class="job-detail">
                                                 <span>Payment Status:</span>
                                                 <span style="text-transform: capitalize; color: <?php 
-                                                    echo $app['payment_status'] === 'completed' ? '#4CAF50' : 
-                                                         ($app['payment_status'] === 'pending' ? '#FF9800' : '#F44336'); 
-                                                ?>;">
-                                                    <?php echo str_replace('_', ' ', ucfirst($app['payment_status'] ?? 'pending')); ?>
+                                                    $paymentStatus = $app['payment_status'] ?? 'pending';
+                                                    echo $paymentStatus === 'completed' ? '#4CAF50' : 
+                                                         ($paymentStatus === 'pending' ? '#FF9800' : '#F44336'); 
+                                                ?>;" 
+                                                      title="<?php 
+                                                          $tooltip = "Status: " . ucfirst($paymentStatus);
+                                                          if (!empty($app['payment_amount'])) {
+                                                              $tooltip .= "\nAmount: ₹" . number_format($app['payment_amount'], 2);
+                                                          }
+                                                          if (!empty($app['razorpay_payment_id'])) {
+                                                              $tooltip .= "\nPayment ID: " . $app['razorpay_payment_id'];
+                                                          }
+                                                          echo htmlspecialchars($tooltip);
+                                                      ?>">
+                                                    <?php echo str_replace('_', ' ', ucfirst($paymentStatus)); ?>
+                                                    <?php if (!empty($app['payment_amount'])): ?>
+                                                        <i class="fas fa-info-circle" style="margin-left: 5px; font-size: 12px; opacity: 0.7;"></i>
+                                                    <?php endif; ?>
                                                 </span>
                                             </div>
+                                            <?php if (!empty($app['payment_amount'])): ?>
+                                            <div class="job-detail">
+                                                <span>Payment Amount:</span>
+                                                <span style="color: #4CAF50; font-weight: bold;">
+                                                    ₹<?php echo number_format($app['payment_amount'], 2); ?>
+                                                </span>
+                                            </div>
+                                            <?php endif; ?>
+                                            <?php if (!empty($app['razorpay_payment_id'])): ?>
+                                            <div class="job-detail">
+                                                <span>Payment ID:</span>
+                                                <span style="color: #2196F3; font-size: 11px; font-family: monospace;">
+                                                    <?php echo htmlspecialchars($app['razorpay_payment_id']); ?>
+                                                </span>
+                                            </div>
+                                            <?php endif; ?>
                                             <!-- New Application Fee Display -->
                                             <div class="job-detail">
                                                 <span>Application Fee:</span>
@@ -1249,6 +1398,55 @@ $conn->close();
                                         </div>
                                     </div>
                                 <?php endforeach; ?>
+                            </div>
+                            
+                            <!-- Applications Summary -->
+                            <div style="margin-top: 30px; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                                <h3 style="color: #FFC107; margin-bottom: 15px; font-size: 18px;">
+                                    <i class="fas fa-info-circle"></i> Applications Summary
+                                </h3>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 24px; font-weight: bold; color: #4CAF50;">
+                                            <?php echo count($applications); ?>
+                                        </div>
+                                        <div style="color: rgba(255,255,255,0.7); font-size: 14px;">Total Applications</div>
+                                    </div>
+                                    
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 24px; font-weight: bold; color: #2196F3;">
+                                            <?php 
+                                            $withPayment = array_filter($applications, function($app) {
+                                                return !empty($app['razorpay_payment_id']);
+                                            });
+                                            echo count($withPayment);
+                                            ?>
+                                        </div>
+                                        <div style="color: rgba(255,255,255,0.7); font-size: 14px;">With Payment Records</div>
+                                    </div>
+                                    
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 24px; font-weight: bold; color: #FF9800;">
+                                            <?php 
+                                            $withoutPayment = array_filter($applications, function($app) {
+                                                return empty($app['razorpay_payment_id']);
+                                            });
+                                            echo count($withoutPayment);
+                                            ?>
+                                        </div>
+                                        <div style="color: rgba(255,255,255,0.7); font-size: 14px;">Without Payment Records</div>
+                                    </div>
+                                    
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 24px; font-weight: bold; color: #FFC107;">
+                                            ₹<?php 
+                                            $totalFees = array_sum(array_column($applications, 'application_fee'));
+                                            echo number_format($totalFees, 2);
+                                            ?>
+                                        </div>
+                                        <div style="color: rgba(255,255,255,0.7); font-size: 14px;">Total Application Fees</div>
+                                    </div>
+                                </div>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -1684,6 +1882,21 @@ $conn->close();
             });
         }, 5000);
 
+        // Function to refresh payment statistics
+        function refreshPaymentStats() {
+            const refreshBtn = document.querySelector('button[onclick="refreshPaymentStats()"]');
+            const icon = refreshBtn.querySelector('i');
+            
+            // Show loading state
+            icon.className = 'fas fa-spinner fa-spin';
+            refreshBtn.disabled = true;
+            
+            // Reload the page to refresh stats
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+        }
+
 
 
         // Debug: Log jobs data to console
@@ -1697,6 +1910,23 @@ $conn->close();
         } else {
             console.log('❌ No jobs loaded from database');
         }
+
+        // Debug: Log applications data to console
+        console.log('Applications data:', <?php echo json_encode($applications); ?>);
+        console.log('Applications count:', <?php echo count($applications); ?>);
+        
+        // Show payment tracking info
+        const applications = <?php echo json_encode($applications); ?>;
+        applications.forEach((app, index) => {
+            console.log(`Application ${index + 1}:`, {
+                id: app.id,
+                student_name: app.student_name,
+                payment_status: app.payment_status,
+                payment_amount: app.payment_amount,
+                razorpay_payment_id: app.razorpay_payment_id,
+                razorpay_order_id: app.razorpay_order_id
+            });
+        });
     </script>
 </body>
 </html> 

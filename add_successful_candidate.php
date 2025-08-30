@@ -11,6 +11,45 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role
 $message = '';
 $messageType = '';
 
+// Handle heading update
+if (isset($_POST['update_heading'])) {
+    $headingText = trim($_POST['heading_text'] ?? '');
+    $subHeadingText = trim($_POST['sub_heading_text'] ?? '');
+    
+    if (empty($headingText)) {
+        $message = 'Heading text is required.';
+        $messageType = 'error';
+    } else {
+        try {
+            // Check if heading exists, if not create it
+            $checkStmt = $conn->prepare("SELECT id FROM content_headings WHERE section_name = 'successful_candidates'");
+            $checkStmt->execute();
+            $result = $checkStmt->get_result();
+            
+            if ($result->num_rows > 0) {
+                // Update existing heading
+                $stmt = $conn->prepare("UPDATE content_headings SET heading_text = ?, sub_heading_text = ?, updated_at = NOW() WHERE section_name = 'successful_candidates'");
+                $stmt->bind_param("ss", $headingText, $subHeadingText);
+            } else {
+                // Insert new heading
+                $stmt = $conn->prepare("INSERT INTO content_headings (section_name, heading_text, sub_heading_text, is_active, created_at) VALUES ('successful_candidates', ?, ?, 1, NOW())");
+                $stmt->bind_param("ss", $headingText, $subHeadingText);
+            }
+            
+            if ($stmt->execute()) {
+                $message = 'Heading updated successfully!';
+                $messageType = 'success';
+            } else {
+                throw new Exception("Execute failed: " . $stmt->error);
+            }
+            $stmt->close();
+        } catch (Exception $e) {
+            $message = 'Error updating heading: ' . $e->getMessage();
+            $messageType = 'error';
+        }
+    }
+}
+
 // Handle candidate deletion
 if (isset($_POST['delete_candidate'])) {
     $candidateId = intval($_POST['candidate_id']);
@@ -30,7 +69,7 @@ if (isset($_POST['delete_candidate'])) {
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['delete_candidate'])) {
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['delete_candidate']) && !isset($_POST['update_heading'])) {
     $companyName = trim($_POST['company_name'] ?? '');
     $candidateName = trim($_POST['candidate_name'] ?? '');
     $salary = trim($_POST['salary'] ?? '');
@@ -83,6 +122,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['delete_candidate'])) 
         $message = implode('<br>', $errors);
         $messageType = 'error';
     }
+}
+
+// Get current heading
+$currentHeading = 'Our Successfully Placed';
+$currentSubHeading = 'Candidates';
+try {
+    $stmt = $conn->prepare("SELECT heading_text, sub_heading_text FROM content_headings WHERE section_name = 'successful_candidates' AND is_active = 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($row = $result->fetch_assoc()) {
+        $currentHeading = $row['heading_text'];
+        $currentSubHeading = $row['sub_heading_text'];
+    }
+} catch (Exception $e) {
+    // Keep default values if error occurs
 }
 
 // Get all successful candidates
@@ -500,6 +554,17 @@ $conn->close();
             transform: translateY(-2px);
         }
 
+        .info-btn {
+            background-color: rgba(33, 150, 243, 0.2);
+            color: var(--info-color);
+            border: 1px solid rgba(33, 150, 243, 0.3);
+        }
+
+        .info-btn:hover {
+            background-color: rgba(33, 150, 243, 0.3);
+            transform: translateY(-2px);
+        }
+
         .alert {
             display: flex;
             align-items: center;
@@ -628,6 +693,28 @@ $conn->close();
             opacity: 0.3;
         }
 
+        /* ===== HEADING PREVIEW STYLES ===== */
+        .heading-preview {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            padding: var(--spacing-lg);
+            border-radius: var(--border-radius-lg);
+            margin-bottom: var(--spacing-lg);
+            text-align: center;
+        }
+
+        .heading-preview h3 {
+            font-size: var(--font-size-xl);
+            font-weight: bold;
+            color: var(--text-light);
+            margin-bottom: var(--spacing-xs);
+        }
+
+        .heading-preview h4 {
+            font-size: var(--font-size-lg);
+            font-weight: bold;
+            color: var(--accent-color);
+        }
+
         @media (max-width: 768px) {
             .sidebar {
                 left: -280px;
@@ -670,13 +757,19 @@ $conn->close();
                             <span>Dashboard</span>
                         </a>
                     </li>
-                    <li>
-                        <a href="manage_jobs.php">
+                    <li class="active">
+                        <a href="add_successful_candidate.php">
                             <i class="fas fa-briefcase"></i>
-                            <span>Manage Jobs</span>
+                            <span>Add Candidate</span>
                         </a>
                     </li>
-                    <li>
+                      <li>
+                        <a href="add_job_new.php">
+                            <i class="fas fa-briefcase"></i>
+                            <span>Add New Job</span>
+                        </a>
+                    </li>
+                     <li>
                         <a href="manage_applications.php">
                             <i class="fas fa-users"></i>
                             <span>Job Applications</span>
@@ -765,9 +858,48 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
+                <!-- Heading Management Section -->
                 <div class="card">
                     <div class="card-header">
-                        <h2>Successful Candidate Details</h2>
+                        <h2><i class="fas fa-heading"></i> Manage Section Heading</h2>
+                        <p>Change the heading text that appears above the successful candidates section</p>
+                    </div>
+                    <div class="card-body">
+                        <!-- Current Heading Preview -->
+                        <div class="heading-preview">
+                            <h3><?php echo htmlspecialchars($currentHeading); ?></h3>
+                            <h4><?php echo htmlspecialchars($currentSubHeading); ?></h4>
+                        </div>
+                        
+                        <form method="POST" class="form">
+                            <div class="form-row two-columns">
+                                <div class="form-group">
+                                    <label for="heading_text"><i class="fas fa-heading"></i> Main Heading</label>
+                                    <input type="text" id="heading_text" name="heading_text" 
+                                           placeholder="e.g., Our Successfully Placed" 
+                                           value="<?php echo htmlspecialchars($currentHeading); ?>" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="sub_heading_text"><i class="fas fa-text-height"></i> Sub Heading</label>
+                                    <input type="text" id="sub_heading_text" name="sub_heading_text" 
+                                           placeholder="e.g., Candidates" 
+                                           value="<?php echo htmlspecialchars($currentSubHeading); ?>" required>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" name="update_heading" class="btn info-btn">
+                                    <i class="fas fa-save"></i> Update Heading
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Add Candidate Section -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-user-plus"></i> Successful Candidate Details</h2>
                         <p>Fill in the details to add a new successfully placed candidate</p>
                     </div>
                     <div class="card-body">
@@ -805,7 +937,7 @@ $conn->close();
                 <!-- Candidates List Section -->
                 <div class="card">
                     <div class="card-header">
-                        <h2>Successful Candidates List</h2>
+                        <h2><i class="fas fa-list"></i> Successful Candidates List</h2>
                         <p>View all successfully placed candidates</p>
                     </div>
                     <div class="card-body">

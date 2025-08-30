@@ -98,6 +98,32 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
   Map<int, List<Map<String, dynamic>>> _contestRankings = {};
 
+  // Add this variable to your state class
+  String _successfulCandidatesHeading = 'Our Successfully Placed';
+  String _successfulCandidatesSubHeading = 'Candidates';
+
+  // Add this method to fetch headings
+  Future<void> _fetchContentHeadings() async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://playsmart.co.in/fetch_content_headings.php?section=successful_candidates'),
+      ).timeout(Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] && data['data'] != null) {
+          setState(() {
+            _successfulCandidatesHeading = data['data']['heading'] ?? 'Our Successfully Placed';
+            _successfulCandidatesSubHeading = data['data']['sub_heading'] ?? 'Candidates';
+          });
+        }
+      }
+    } catch (e) {
+      print('Error fetching content headings: $e');
+      // Keep default values if API fails
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -177,6 +203,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     
     // Add app lifecycle listener for session tracking
     WidgetsBinding.instance.addObserver(this);
+    _fetchContentHeadings(); // Add this line
   }
 
   @override
@@ -367,6 +394,13 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         
         print('🔐 DEBUG: ❌ No valid session found, redirecting to login...');
         
+        // Don't redirect if payment just completed
+        if (_paymentJustCompleted) {
+          print('🔐 DEBUG: 🚫 Payment just completed, preventing login redirect');
+          _paymentJustCompleted = false; // Reset flag
+          return;
+        }
+        
         // Small delay to ensure UI is ready
         Future.delayed(Duration(milliseconds: 500), () {
           _redirectToLogin();
@@ -388,10 +422,26 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           print('🔐 DEBUG: ✅ Session recovered after error');
         } else {
           print('🔐 DEBUG: ❌ No token to recover, redirecting to login...');
+          
+          // Don't redirect if payment just completed
+          if (_paymentJustCompleted) {
+            print('🔐 DEBUG: 🚫 Payment just completed, preventing login redirect');
+            _paymentJustCompleted = false; // Reset flag
+            return;
+          }
+          
           _redirectToLogin();
         }
       } catch (e2) {
         print('🔐 DEBUG: ❌ Failed to recover session: $e2');
+        
+        // Don't redirect if payment just completed
+        if (_paymentJustCompleted) {
+          print('🔐 DEBUG: 🚫 Payment just completed, preventing login redirect');
+          _paymentJustCompleted = false; // Reset flag
+          return;
+        }
+        
         _redirectToLogin();
       }
     }
@@ -4301,7 +4351,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Our Successfully Placed',
+                                _successfulCandidatesHeading,
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 18,
@@ -4311,7 +4361,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                               Row(
                                 children: [
                                   Text(
-                                    'Candidates',
+                                    _successfulCandidatesSubHeading,
                                     style: GoogleFonts.poppins(
                                       color: Colors.yellow,
                                       fontSize: 18,
@@ -5634,7 +5684,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
 9. If all the above are acceptable then  register today. The company will contact you today for a job    according to your education and provide you with further information.
       ''';
-      amountText = '₹1000.00';
+      amountText = '1000.00';
       amount = 1000.0;
     }
 
@@ -5776,6 +5826,20 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
   Future<void> _submitJobApplication(Job job, String referralCode, Map<String, String> formData, String? photoPath, String? resumePath) async {
     try {
+      // Get user token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? prefs.getString('userToken') ?? prefs.getString('authToken');
+      
+      if (token == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Please login to submit application'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
       // Show loading indicator
       showDialog(
         context: context,
@@ -5825,11 +5889,12 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
       print('DEBUG: Submitting application data: $data');
 
-      // Send to backend to store in database
+      // Send to backend to store in database with authorization token
       final response = await http.post(
         Uri.parse('https://playsmart.co.in/submit_job_application_new.php'),
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode(data),
       ).timeout(Duration(seconds: 30));
@@ -5964,12 +6029,74 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     try {
       print('DEBUG: _openPaymentGateway called with amount: $amount');
       
-      // Create payment options directly
+      // Get user token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? prefs.getString('userToken') ?? prefs.getString('authToken');
+      
+      if (token == null) {
+        throw Exception('Please login to proceed with payment');
+      }
+      
+      // FIRST: Create Razorpay order on your backend
+      final orderResponse = await http.post(
+        Uri.parse('https://playsmart.co.in/create_razorpay_order.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'amount': (amount * 100).toInt(), // Amount in paise
+          'currency': 'INR',
+          'job_id': job.id,
+          'job_title': job.jobTitle,
+          'user_email': '', // Get from SharedPreferences if available
+        }),
+      ).timeout(Duration(seconds: 15));
+
+      print('DEBUG: Order response status: ${orderResponse.statusCode}');
+      print('DEBUG: Order response body: ${orderResponse.body}');
+      print('DEBUG: Order response headers: ${orderResponse.headers}');
+
+      if (orderResponse.statusCode != 200) {
+        throw Exception('Failed to create payment order. Status: ${orderResponse.statusCode}, Body: ${orderResponse.body}');
+      }
+
+      // Check if response is valid JSON
+      if (orderResponse.body.trim().isEmpty) {
+        throw Exception('Empty response from server');
+      }
+
+      // Check if response starts with HTML (error page)
+      if (orderResponse.body.trim().startsWith('<')) {
+        throw Exception('Server returned HTML instead of JSON. This usually means a PHP error occurred. Response: ${orderResponse.body.substring(0, 200)}...');
+      }
+
+      Map<String, dynamic> orderData;
+      try {
+        orderData = jsonDecode(orderResponse.body);
+      } catch (e) {
+        print('ERROR: Failed to parse JSON response: $e');
+        print('ERROR: Response body: ${orderResponse.body}');
+        throw Exception('Invalid JSON response from server: ${orderResponse.body.substring(0, 200)}...');
+      }
+      if (!orderData['success']) {
+        throw Exception('Order creation failed: ${orderData['message']}');
+      }
+
+      final orderId = orderData['order_id'] ?? orderData['data']?['order_id'];
+      if (orderId == null) {
+        throw Exception('Order ID not found in response. Response: ${jsonEncode(orderData)}');
+      }
+      print('DEBUG: Created Razorpay order: $orderId');
+      
+      // Create payment options with the order ID
       var options = {
         'key': 'rzp_live_fgQr0ACWFbL4pN',
         'amount': (amount * 100).toInt(), // Amount in paise
+        'currency': 'INR',
         'name': 'PlaySmart Services',
         'description': 'Job Application Fee for ${job.jobTitle}',
+        'order_id': orderId, // CRITICAL: Include the order ID
         'prefill': {
           'contact': '',
           'email': '',
@@ -5981,21 +6108,13 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       
       print('DEBUG: Payment options created: ${jsonEncode(options)}');
       
-      // Create a new Razorpay instance directly here instead of trying to access MainScreen
-      print('DEBUG: Creating new Razorpay instance...');
+      // Create a new Razorpay instance
       final razorpay = Razorpay();
       
       // Set up event handlers
-      razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, (PaymentSuccessResponse response) {
+      razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, (PaymentSuccessResponse response) async {
         print('DEBUG: Payment success: ${response.paymentId}');
-        Navigator.pop(context); // Close the modal
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Payment successful! Payment ID: ${response.paymentId}'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        // Clean up
+        await _handlePaymentSuccessWithCapture(response, job, amount, referralCode);
         razorpay.clear();
       });
       
@@ -6007,13 +6126,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
             backgroundColor: Colors.red,
           ),
         );
-        // Clean up
         razorpay.clear();
       });
       
       razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, (ExternalWalletResponse response) {
         print('DEBUG: External wallet: ${response.walletName}');
-        // Clean up
         razorpay.clear();
       });
       
@@ -6023,7 +6140,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       
     } catch (e) {
       print('ERROR: Error in _openPaymentGateway: $e');
-      print('ERROR: Full error details: ${e.toString()}');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error opening payment gateway: $e'),
@@ -6031,6 +6147,174 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         ),
       );
     }
+  }
+
+  // Flag to prevent login redirect after payment
+  bool _paymentJustCompleted = false;
+  
+  // New method to handle payment success with capture
+  Future<void> _handlePaymentSuccessWithCapture(
+    PaymentSuccessResponse response, 
+    Job job, 
+    double amount, 
+    String referralCode
+  ) async {
+    try {
+      print('DEBUG: Processing payment success with capture...');
+      
+      // Get user token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? prefs.getString('userToken') ?? prefs.getString('authToken');
+      
+      if (token == null) {
+        print('DEBUG: No token found for payment capture');
+        return;
+      }
+      
+      // Capture the payment on your backend
+      final captureResponse = await http.post(
+        Uri.parse('https://playsmart.co.in/capture_payment_clean.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'payment_id': response.paymentId,
+          'order_id': response.orderId,
+          'signature': response.signature,
+          'job_id': job.id,
+          'amount': amount,
+          'referral_code': referralCode,
+        }),
+      ).timeout(Duration(seconds: 15));
+
+      if (captureResponse.statusCode == 200) {
+        final captureData = jsonDecode(captureResponse.body);
+        if (captureData['success']) {
+          print('DEBUG: Payment captured successfully');
+          
+          // Set flag to prevent login redirect
+          _paymentJustCompleted = true;
+          
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Payment successful! Payment ID: ${response.paymentId}'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          
+          // Close any open modals
+          Navigator.of(context).pop();
+          
+          // Update local application status and refresh data
+          setState(() {
+            // Update the job application status in the map to show status button
+            userJobApplications[job.id] = 'pending';
+          });
+          
+
+          
+          // Refresh job applications to show updated status
+          await fetchJobApplications();
+          
+          // Also refresh jobs to update the UI
+          await fetchJobs();
+          
+          // Show success dialog
+          _showPaymentSuccessDialog(job, response.paymentId!);
+          
+
+          
+        } else {
+          print('DEBUG: Payment capture failed: ${captureData['message']}');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Payment capture failed: ${captureData['message']}'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+      } else {
+        print('DEBUG: Payment capture HTTP error: ${captureResponse.statusCode}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Payment capture failed. Please contact support.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      print('ERROR: Error capturing payment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error processing payment: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+  
+
+  
+  // Show payment success dialog
+  void _showPaymentSuccessDialog(Job job, String paymentId) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green, size: 30),
+              SizedBox(width: 10),
+              Text('Payment Successful!'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Your job application has been submitted successfully!'),
+              SizedBox(height: 10),
+              Text('Job: ${job.jobTitle}'),
+              Text('Payment ID: $paymentId'),
+              SizedBox(height: 10),
+              Text(
+                'Your application is now being processed. You will receive updates via email.',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                // Only close the dialog, don't close the main screen
+                Navigator.of(context).pop();
+                
+                // Refresh the main screen data to show updated status
+                if (mounted) {
+                  setState(() {});
+                }
+                
+                // Force refresh to show status button
+                Future.delayed(Duration(milliseconds: 100), () {
+                  if (mounted) {
+                    fetchJobApplications();
+                    fetchJobs();
+                  }
+                });
+              },
+              child: Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -6274,7 +6558,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
   Widget build(BuildContext context) {
     final packageValue = double.tryParse(widget.job.package.replaceAll(RegExp(r'[^\d.]'), ''));
     final isHighPackage = packageValue != null && packageValue >= 20;
-    final registrationFee = isHighPackage ? '₹2000' : '₹1000';
+    final registrationFee = isHighPackage ? '₹2000' : '₹2';
     
     return Column(
       children: [
@@ -6933,7 +7217,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
 
 6. **Support**: Our team will guide you through the entire process.
 
-**Referral Program**: If you used a referral code, the referrer will receive 20% commission on your registration fee.
+**Referral Program**: If you used a referral code, the referrer will receive 20% commission.
       ''';
       amountText = '₹0.2';
       amount = 0.2;
@@ -7098,12 +7382,74 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
     try {
       print('DEBUG: _openPaymentGateway called with amount: $amount');
       
-      // Create payment options directly
+      // Get user token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? prefs.getString('userToken') ?? prefs.getString('authToken');
+      
+      if (token == null) {
+        throw Exception('Please login to proceed with payment');
+      }
+      
+      // FIRST: Create Razorpay order on your backend
+      final orderResponse = await http.post(
+        Uri.parse('https://playsmart.co.in/create_razorpay_order.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'amount': (amount * 100).toInt(), // Amount in paise
+          'currency': 'INR',
+          'job_id': job.id,
+          'job_title': job.jobTitle,
+          'user_email': '', // Get from SharedPreferences if available
+        }),
+      ).timeout(Duration(seconds: 15));
+
+      print('DEBUG: Order response status: ${orderResponse.statusCode}');
+      print('DEBUG: Order response body: ${orderResponse.body}');
+      print('DEBUG: Order response headers: ${orderResponse.headers}');
+
+      if (orderResponse.statusCode != 200) {
+        throw Exception('Failed to create payment order. Status: ${orderResponse.statusCode}, Body: ${orderResponse.body}');
+      }
+
+      // Check if response is valid JSON
+      if (orderResponse.body.trim().isEmpty) {
+        throw Exception('Empty response from server');
+      }
+
+      // Check if response starts with HTML (error page)
+      if (orderResponse.body.trim().startsWith('<')) {
+        throw Exception('Server returned HTML instead of JSON. This usually means a PHP error occurred. Response: ${orderResponse.body.substring(0, 200)}...');
+      }
+
+      Map<String, dynamic> orderData;
+      try {
+        orderData = jsonDecode(orderResponse.body);
+      } catch (e) {
+        print('ERROR: Failed to parse JSON response: $e');
+        print('ERROR: Response body: ${orderResponse.body}');
+        throw Exception('Invalid JSON response from server: ${orderResponse.body.substring(0, 200)}...');
+      }
+      if (!orderData['success']) {
+        throw Exception('Order creation failed: ${orderData['message']}');
+      }
+
+      final orderId = orderData['order_id'] ?? orderData['data']?['order_id'];
+      if (orderId == null) {
+        throw Exception('Order ID not found in response. Response: ${jsonEncode(orderData)}');
+      }
+      print('DEBUG: Created Razorpay order: $orderId');
+      
+      // Create payment options with the order ID
       var options = {
         'key': 'rzp_live_fgQr0ACWFbL4pN',
         'amount': (amount * 100).toInt(), // Amount in paise
+        'currency': 'INR',
         'name': 'PlaySmart Services',
         'description': 'Job Application Fee for ${job.jobTitle}',
+        'order_id': orderId, // CRITICAL: Include the order ID
         'prefill': {
           'contact': '',
           'email': '',
@@ -7115,20 +7461,17 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       
       print('DEBUG: Payment options created: ${jsonEncode(options)}');
       
-      // Create a new Razorpay instance directly here instead of trying to access MainScreen
-      print('DEBUG: Creating new Razorpay instance...');
+      // Create a new Razorpay instance
       final razorpay = Razorpay();
       
       // Set up event handlers
-      razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, (PaymentSuccessResponse response) {
+      razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, (PaymentSuccessResponse response) async {
         print('DEBUG: Payment success: ${response.paymentId}');
         Navigator.pop(context); // Close the modal
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Payment successful! Payment ID: ${response.paymentId}'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        
+        // Handle payment success with capture
+        await _handlePaymentSuccessWithCapture(response, job, amount, referralCode);
+        
         // Clean up
         razorpay.clear();
       });
@@ -7165,5 +7508,144 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
         ),
       );
     }
+  }
+  
+  // Handle payment success with capture for job application form
+  Future<void> _handlePaymentSuccessWithCapture(
+    PaymentSuccessResponse response, 
+    Job job, 
+    double amount, 
+    String referralCode
+  ) async {
+    try {
+      print('DEBUG: Processing payment success with capture from form...');
+      
+      // Get user token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? prefs.getString('userToken') ?? prefs.getString('authToken');
+      
+      if (token == null) {
+        print('DEBUG: No token found for payment capture');
+        return;
+      }
+      
+      // Capture the payment on your backend
+      final captureResponse = await http.post(
+        Uri.parse('https://playsmart.co.in/capture_payment_clean.php'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'payment_id': response.paymentId,
+          'order_id': response.orderId,
+          'signature': response.signature,
+          'job_id': job.id,
+          'amount': amount,
+          'referral_code': referralCode,
+        }),
+      ).timeout(Duration(seconds: 15));
+
+      if (captureResponse.statusCode == 200) {
+        final captureData = jsonDecode(captureResponse.body);
+        if (captureData['success']) {
+          print('DEBUG: Payment captured successfully from form');
+          
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Payment successful! Payment ID: ${response.paymentId}'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          
+          // Show success dialog
+          _showPaymentSuccessDialog(job, response.paymentId!);
+          
+        } else {
+          print('DEBUG: Payment capture failed from form: ${captureData['message']}');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Payment capture failed: ${captureData['message']}'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+      } else {
+        print('DEBUG: Payment capture HTTP error from form: ${captureResponse.statusCode}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Payment capture failed. Please contact support.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      print('ERROR: Error capturing payment from form: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error processing payment: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+  
+  // Show payment success dialog for job application form
+  void _showPaymentSuccessDialog(Job job, String paymentId) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green, size: 30),
+              SizedBox(width: 10),
+              Text('Payment Successful!'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Your job application has been submitted successfully!'),
+              SizedBox(height: 10),
+              Text('Job: ${job.jobTitle}'),
+              Text('Payment ID: $paymentId'),
+              SizedBox(height: 10),
+              Text(
+                'Your application is now being processed. You will receive updates via email.',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                // Only close the dialog, don't close the form
+                Navigator.of(context).pop();
+                
+                // Close the form and go back to main screen
+                Navigator.of(context).pop();
+                
+                // Force refresh to show status button
+                Future.delayed(Duration(milliseconds: 100), () {
+                  if (mounted) {
+                    // This will refresh the main screen data
+                    setState(() {});
+                  }
+                });
+              },
+              child: Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
