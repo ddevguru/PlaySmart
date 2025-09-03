@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as path;
 import 'package:playsmart/Auth/login_screen.dart';
 import 'package:playsmart/Models/contest.dart';
 import 'package:playsmart/Models/job.dart';
@@ -1021,6 +1022,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     final TextEditingController nameController = TextEditingController();
     final TextEditingController emailController = TextEditingController();
     final TextEditingController phoneController = TextEditingController();
+    final TextEditingController educationController = TextEditingController();
     final TextEditingController experienceController = TextEditingController();
     final TextEditingController skillsController = TextEditingController();
     final TextEditingController referralCodeController = TextEditingController();
@@ -1142,6 +1144,29 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                             style: GoogleFonts.poppins(color: Colors.white),
                             decoration: InputDecoration(
                               labelText: 'Phone Number',
+                              labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.white30),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.yellow),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 12),
+                          
+                          // Education Field
+                          TextFormField(
+                            controller: educationController,
+                            style: GoogleFonts.poppins(color: Colors.white),
+                            decoration: InputDecoration(
+                              labelText: 'Education',
                               labelStyle: GoogleFonts.poppins(color: Colors.white70),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
@@ -1431,6 +1456,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                               if (nameController.text.isEmpty ||
                                   emailController.text.isEmpty ||
                                   phoneController.text.isEmpty ||
+                                  educationController.text.isEmpty ||
                                   experienceController.text.isEmpty ||
                                   skillsController.text.isEmpty) {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1467,6 +1493,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                                 'name': nameController.text,
                                 'email': emailController.text,
                                 'phone': phoneController.text,
+                                'education': educationController.text,
                                 'experience': experienceController.text,
                                 'skills': skillsController.text,
                               };
@@ -5853,6 +5880,44 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         },
       );
 
+      // Convert files to base64 if provided
+      String photoData = '';
+      String photoName = '';
+      String resumeData = '';
+      String resumeName = '';
+
+      try {
+        // Convert photo to base64
+        if (photoPath != null && photoPath.isNotEmpty) {
+          final photoFile = File(photoPath);
+          if (await photoFile.exists()) {
+            final photoBytes = await photoFile.readAsBytes();
+            photoData = base64Encode(photoBytes);
+            photoName = path.basename(photoPath);
+          }
+        }
+
+        // Convert resume to base64
+        if (resumePath != null && resumePath.isNotEmpty) {
+          final resumeFile = File(resumePath);
+          if (await resumeFile.exists()) {
+            final resumeBytes = await resumeFile.readAsBytes();
+            resumeData = base64Encode(resumeBytes);
+            resumeName = path.basename(resumePath);
+          }
+        }
+      } catch (e) {
+        print('Error converting files to base64: $e');
+        Navigator.pop(context); // Hide loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error processing files. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
       // Determine if this is a new job (from new_jobs table) or old job
       bool isNewJob = job.companyName.isEmpty || job.companyName == 'Company';
       String jobType = 'higher_job'; // Default to higher_job
@@ -5874,30 +5939,36 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
         jobType = newJob.jobType;
       }
 
-      // Prepare data for submission
+      // Prepare data for submission with files
       final data = {
-        'job_id': job.id,
-        'job_type': jobType,
-        'student_name': formData['name'] ?? '',
+        'name': formData['name'] ?? '',
         'email': formData['email'] ?? '',
         'phone': formData['phone'] ?? '',
+        'education': formData['education'] ?? '',
         'experience': formData['experience'] ?? '',
         'skills': formData['skills'] ?? '',
+        'job_id': job.id,
         'referral_code': referralCode.isNotEmpty ? referralCode : '',
+        'photo_data': photoData,
+        'photo_name': photoName,
+        'resume_data': resumeData,
+        'resume_name': resumeName,
+        'company_name': job.companyName.isNotEmpty ? job.companyName : 'Company',
+        'package': job.package,
+        'profile': job.jobTitle,
         'district': 'Mumbai', // Default location
       };
 
-      print('DEBUG: Submitting application data: $data');
+      print('DEBUG: Submitting application data with files');
 
-      // Send to backend to store in database with authorization token
+      // Send to backend to store in database with files
       final response = await http.post(
-        Uri.parse('https://playsmart.co.in/submit_job_application_new.php'),
+        Uri.parse('https://playsmart.co.in/submit_job_application_final.php'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
         },
         body: jsonEncode(data),
-      ).timeout(Duration(seconds: 30));
+      ).timeout(Duration(seconds: 60)); // Increased timeout for file uploads
 
       print('DEBUG: Response status: ${response.statusCode}');
       print('DEBUG: Response body: ${response.body}');
@@ -5911,7 +5982,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           // Show success message
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Application submitted successfully!'),
+              content: Text('Application submitted successfully! Files uploaded and data stored in database.'),
               backgroundColor: Colors.green,
             ),
           );
@@ -5921,14 +5992,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           final jobType = responseData['data']['job_type'];
           
           print('DEBUG: Application submitted successfully. ID: $applicationId, Job Type: $jobType');
+          print('DEBUG: Photo path: ${responseData['data']['photo_path']}');
+          print('DEBUG: Resume path: ${responseData['data']['resume_path']}');
           
           // Store the application ID for payment tracking
           _currentApplicationId = applicationId;
-          
-          // Upload files if they were selected
-          if (photoPath != null && resumePath != null) {
-            await _uploadFilesToServer(applicationId, photoPath, resumePath);
-          }
           
           // Show instructions modal
           _showInstructionsModal(job, referralCode);
@@ -7102,6 +7170,40 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
         },
       );
 
+      // Convert files to base64
+      String photoData = '';
+      String photoName = '';
+      String resumeData = '';
+      String resumeName = '';
+
+      try {
+        // Convert photo to base64
+        final photoFile = File(_selectedPhotoPath!);
+        if (await photoFile.exists()) {
+          final photoBytes = await photoFile.readAsBytes();
+          photoData = base64Encode(photoBytes);
+          photoName = path.basename(_selectedPhotoPath!);
+        }
+
+        // Convert resume to base64
+        final resumeFile = File(_selectedResumePath!);
+        if (await resumeFile.exists()) {
+          final resumeBytes = await resumeFile.readAsBytes();
+          resumeData = base64Encode(resumeBytes);
+          resumeName = path.basename(_selectedResumePath!);
+        }
+      } catch (e) {
+        print('Error converting files to base64: $e');
+        Navigator.pop(context); // Hide loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error processing files. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
       // Prepare data for submission
       final data = {
         'name': _nameController.text,
@@ -7112,24 +7214,26 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
         'skills': _skillsController.text,
         'job_id': widget.job.id,
         'referral_code': _referralCodeController.text.isNotEmpty ? _referralCodeController.text : '',
-        'photo_path': _selectedPhotoPath ?? '',
-        'resume_path': _selectedResumePath ?? '',
+        'photo_data': photoData,
+        'photo_name': photoName,
+        'resume_data': resumeData,
+        'resume_name': resumeName,
         'company_name': widget.job.companyName,
         'package': widget.job.package,
         'profile': widget.job.jobTitle,
         'district': 'Mumbai', // Default location
       };
 
-      print('DEBUG: Submitting application data: $data');
+      print('DEBUG: Submitting application data with files');
 
-      // Send to backend to store in database
-      final response = await http.post(
-        Uri.parse('https://playsmart.co.in/submit_job_application_working.php'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(data),
-      ).timeout(Duration(seconds: 30));
+              // Send to backend to store in database
+        final response = await http.post(
+          Uri.parse('https://playsmart.co.in/submit_job_application_final.php'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(data),
+        ).timeout(Duration(seconds: 60)); // Increased timeout for file uploads
 
       print('DEBUG: Response status: ${response.statusCode}');
       print('DEBUG: Response body: ${response.body}');
@@ -7140,20 +7244,20 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body);
         
-              if (result['success']) {
-        // Store user email for payment processing
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_email', _emailController.text);
-        print('DEBUG: User email stored: ${_emailController.text}');
-        
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Application submitted successfully! Data stored in database.'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
+        if (result['success']) {
+          // Store user email for payment processing
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('user_email', _emailController.text);
+          print('DEBUG: User email stored: ${_emailController.text}');
+          
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Application submitted successfully! Files uploaded and data stored in database.'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
           
           // Close the form and show payment instructions
           Navigator.pop(context);

@@ -97,6 +97,11 @@ try {
         throw new Exception('Email does not match authenticated user');
     }
     
+    // Additional validation: ensure user_id is valid
+    if (empty($userId) || $userId <= 0) {
+        throw new Exception('Invalid user ID. Please log in again.');
+    }
+    
     // Check if user already applied for this job
     $checkStmt = $conn->prepare("SELECT id FROM job_applications WHERE job_id = ? AND user_id = ? AND is_active = 1");
     if (!$checkStmt) {

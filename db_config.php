@@ -5,7 +5,7 @@
 // Database credentials for your hosting server
 $host = 'localhost';
 $username = 'u968643667_playsmart'; // Your actual database username from logs
-$password = 'your_actual_password'; // Replace with your actual database password
+$password = 'Playsmart@123'; // Replace with your actual database password
 $database = 'u968643667_playsmart'; // Your actual database name from logs
 
 // Create connection
@@ -30,7 +30,7 @@ ini_set('display_errors', 1);
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'u968643667_playsmart'); // Your actual database name from logs
 define('DB_USERNAME', 'u968643667_playsmart'); // Your actual database username from logs
-define('DB_PASSWORD', 'your_actual_password'); // Replace with your actual database password
+define('DB_PASSWORD', 'Playsmart@123'); // Replace with your actual database password
 define('DB_CHARSET', 'utf8mb4');
 
 // Base URL for the application

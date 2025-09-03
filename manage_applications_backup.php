@@ -190,7 +190,7 @@ try {
         FROM job_applications ja
         LEFT JOIN jobs j ON ja.job_id = j.id AND j.is_active = 1
         LEFT JOIN new_jobs nj ON ja.job_id = nj.id AND nj.is_active = 1
-        LEFT JOIN payment_tracking pt ON ja.user_id = pt.user_id AND ja.job_id = pt.job_id
+        LEFT JOIN payment_tracking pt ON ja.job_id = pt.job_id
         $whereClause
         ORDER BY ja.applied_date DESC
     ";
