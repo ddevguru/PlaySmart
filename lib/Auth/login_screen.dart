@@ -67,9 +67,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     SharedPreferences prefs = await SharedPreferences.getInstance();
     bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
     String? rememberedEmail = prefs.getString('rememberedEmail');
+    bool rememberMe = prefs.getBool('remember_me') ?? false;
+    
     if (mounted) {
       setState(() {
         _isLoggedIn = isLoggedIn;
+        _rememberMe = rememberMe;
         if (rememberedEmail != null) {
           _emailController.text = rememberedEmail;
         }
@@ -133,11 +136,27 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           SharedPreferences prefs = await SharedPreferences.getInstance();
           await prefs.setBool('isLoggedIn', true);
           await prefs.setString('token', data['token']);
+          await prefs.setString('user_email', _emailController.text);
+          
+          // Save user info if available
+          if (data['user_name'] != null) {
+            await prefs.setString('user_name', data['user_name']);
+          }
+          if (data['user_id'] != null) {
+            await prefs.setString('user_id', data['user_id'].toString());
+          }
 
           if (_rememberMe) {
             await prefs.setString('rememberedEmail', _emailController.text);
+            await prefs.setBool('remember_me', true);
+            // Optionally save password for auto-login (consider security implications)
+            // await prefs.setString('rememberedPassword', _passwordController.text);
+            await prefs.setBool('auto_login', true);
           } else {
             await prefs.remove('rememberedEmail');
+            await prefs.remove('rememberedPassword');
+            await prefs.setBool('remember_me', false);
+            await prefs.setBool('auto_login', false);
           }
 
           setState(() {
@@ -204,11 +223,40 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
       final data = jsonDecode(response.body);
       if (data['success']) {
+        // Check if user wants to remember credentials
+        bool rememberMe = prefs.getBool('remember_me') ?? false;
+        String? rememberedEmail = prefs.getString('rememberedEmail');
+        
+        // Clear session data
         await prefs.setBool('isLoggedIn', false);
         await prefs.remove('token');
+        await prefs.remove('user_email');
+        await prefs.remove('user_name');
+        await prefs.remove('user_id');
+        
+        // Keep remembered credentials if user had remember me enabled
+        if (rememberMe && rememberedEmail != null) {
+          await prefs.setString('rememberedEmail', rememberedEmail);
+          await prefs.setBool('remember_me', true);
+          await prefs.setBool('auto_login', false); // Disable auto-login but keep credentials
+        } else {
+          // Clear all remembered data
+          await prefs.remove('rememberedEmail');
+          await prefs.remove('rememberedPassword');
+          await prefs.setBool('remember_me', false);
+          await prefs.setBool('auto_login', false);
+        }
+        
         setState(() {
           _isLoggedIn = false;
+          _rememberMe = rememberMe;
+          if (rememberMe && rememberedEmail != null) {
+            _emailController.text = rememberedEmail;
+          } else {
+            _emailController.clear();
+          }
         });
+        
         _showSuccessSnackBar('Logout successful');
       } else {
         _showErrorSnackBar(data['message'] ?? 'Logout failed');

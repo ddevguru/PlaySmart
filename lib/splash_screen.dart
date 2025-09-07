@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 import 'package:animated_text_kit/animated_text_kit.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 // import 'package:lottie/lottie.dart'; // Removed Lottie dependency
 import 'package:playsmart/Auth/login_screen.dart';
 import 'package:playsmart/Auth/signup_screen.dart';
+import 'package:playsmart/main_screen.dart';
+import 'package:playsmart/services/auth_service.dart';
+import 'package:playsmart/services/session_manager.dart';
 
 
 class SplashScreen extends StatefulWidget {
@@ -49,6 +53,100 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     );
     
     _controller.forward();
+    
+    // Check login status after animation starts
+    _checkLoginStatusAndNavigate();
+  }
+  
+  Future<void> _checkLoginStatusAndNavigate() async {
+    try {
+      // Wait for animation to complete
+      await Future.delayed(Duration(milliseconds: 2000));
+      
+      if (!mounted) return;
+      
+      final sessionManager = SessionManager();
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Check if user is already logged in
+      final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+      final token = prefs.getString('token');
+      final rememberedEmail = prefs.getString('rememberedEmail');
+      final autoLogin = prefs.getBool('auto_login') ?? false;
+      
+      print('🔐 SPLASH: Checking login status...');
+      print('🔐 SPLASH: isLoggedIn: $isLoggedIn');
+      print('🔐 SPLASH: token exists: ${token != null}');
+      print('🔐 SPLASH: rememberedEmail: $rememberedEmail');
+      print('🔐 SPLASH: autoLogin: $autoLogin');
+      
+      if (isLoggedIn && token != null && token.isNotEmpty) {
+        print('🔐 SPLASH: User is logged in, validating session...');
+        
+        // Validate session with server
+        final isValidSession = await sessionManager.isSessionValid();
+        
+        if (isValidSession) {
+          print('🔐 SPLASH: Session is valid, navigating to main screen');
+          
+          // Update last activity
+          await sessionManager.updateLastActivity();
+          
+          _navigateToMainScreen();
+        } else {
+          print('🔐 SPLASH: Session is invalid, clearing session and showing login');
+          await sessionManager.clearSession(keepRemembered: true);
+          setState(() {
+            // Show login/signup buttons
+          });
+        }
+      } else if (autoLogin && rememberedEmail != null && token != null) {
+        print('🔐 SPLASH: Auto-login enabled, attempting to restore session...');
+        
+        // Try to validate the stored token
+        final isValidToken = await sessionManager.isSessionValid();
+        
+        if (isValidToken) {
+          print('🔐 SPLASH: Stored token is valid, navigating to main screen');
+          await sessionManager.updateLastActivity();
+          _navigateToMainScreen();
+        } else {
+          print('🔐 SPLASH: Stored token is invalid, clearing session');
+          await sessionManager.clearSession(keepRemembered: true);
+          setState(() {
+            // Show login/signup buttons
+          });
+        }
+      } else if (rememberedEmail != null) {
+        print('🔐 SPLASH: User has remembered email, showing login with pre-filled email');
+        // Don't auto-navigate, let user choose to login or signup
+      } else {
+        print('🔐 SPLASH: No login credentials found, showing login/signup options');
+        // Don't auto-navigate, let user choose to login or signup
+      }
+    } catch (e) {
+      print('🔐 SPLASH: Error checking login status: $e');
+      // On error, show login/signup options
+    }
+  }
+  
+  void _navigateToMainScreen() {
+    if (!mounted) return;
+    
+    Navigator.pushReplacement(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => MainScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          var begin = Offset(0.0, 1.0);
+          var end = Offset.zero;
+          var curve = Curves.easeInOutQuart;
+          var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+          return SlideTransition(position: animation.drive(tween), child: child);
+        },
+        transitionDuration: Duration(milliseconds: 700),
+      ),
+    );
   }
   
   @override

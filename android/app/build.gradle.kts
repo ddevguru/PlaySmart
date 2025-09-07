@@ -32,7 +32,7 @@ android {
         applicationId = "com.codify.playsmart"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 19
+        versionCode = 21
         versionName = flutter.versionName
     }
 

@@ -5,6 +5,7 @@ class NewJob {
   final String education;
   final String jobType;
   final String createdAt;
+  final double applicationFee;
 
   NewJob({
     required this.id,
@@ -13,6 +14,7 @@ class NewJob {
     required this.education,
     required this.jobType,
     required this.createdAt,
+    this.applicationFee = 1000.0,
   });
 
   factory NewJob.fromJson(Map<String, dynamic> json) {
@@ -23,6 +25,7 @@ class NewJob {
       education: json['education'] ?? '',
       jobType: json['job_type'] ?? '',
       createdAt: json['created_at'] ?? '',
+      applicationFee: (json['application_fee'] ?? 1000).toDouble(),
     );
   }
 
@@ -34,9 +37,29 @@ class NewJob {
       'education': education,
       'job_type': jobType,
       'created_at': createdAt,
+      'application_fee': applicationFee,
     };
   }
 
-  bool get isHigherJob => jobType == 'higher_job';
-  bool get isLocalJob => jobType == 'local_job';
+  // FIXED: Updated logic - 5 LPA and above is higher job
+  bool get isHigherJob {
+    // If job_type is explicitly set to higher_job, it's a higher job
+    if (jobType == 'higher_job') return true;
+    
+    // If job_type is explicitly set to local_job, it's a local job
+    if (jobType == 'local_job') return false;
+    
+    // Fallback: Check salary for LPA >= 5
+    if (salary.contains('LPA')) {
+      final salaryValue = double.tryParse(salary.replaceAll(RegExp(r'[^\d.]'), ''));
+      return salaryValue != null && salaryValue >= 5;
+    }
+    
+    return false;
+  }
+  
+  bool get isLocalJob => !isHigherJob;
+  
+  // FIXED: Higher jobs (5+ LPA) get 2000 fee, local jobs get 1000 fee
+  double get calculatedFee => isHigherJob ? 2000.0 : 1000.0;
 } 

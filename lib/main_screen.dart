@@ -1,5 +1,4 @@
-import 'dart:async';
-import 'dart:convert';
+import 'dart:async';import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:file_picker/file_picker.dart';
@@ -128,7 +127,11 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   @override
   void initState() {
     super.initState();
-    
+    _initializeApp();
+    fetchJobApplications(); // Add this line
+  }
+
+  void _initializeApp() {
     // Initialize Razorpay - RESTORE ORIGINAL WORKING CODE
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
@@ -1588,7 +1591,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     
     // Determine amount based on job package (10LPA threshold)
     final packageValue = double.tryParse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim());
-    final isHighPackage = packageValue != null && packageValue >= 10;
+    final isHighPackage = packageValue != null && packageValue >= 5;
     final amountInRupees = isHighPackage ? 2000.0 : 1000.0;
     final amountInPaise = (amountInRupees * 100).toInt();
     
@@ -2093,7 +2096,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       
       // Determine payment amount based on job package
       final packageValue = double.tryParse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim());
-      final isHighPackage = packageValue != null && packageValue >= 10;
+      final isHighPackage = packageValue != null && packageValue >= 5;
       final amount = isHighPackage ? 2000.0 : 1000.0;
       
       print('DEBUG: Job package: ${job.package}, Amount: $amount, IsHighPackage: $isHighPackage');
@@ -2423,7 +2426,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     try {
       await updateLastActivity();
       final response = await http.get(
-        Uri.parse('https://playsmart.co.in/fetch_user_balance.php?session_token=$token'),
+        Uri.parse('https://playsmart.co.in/check_job_application_status.php?session_token=$token'),
       ).timeout(Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -2454,55 +2457,38 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
   Future<void> fetchJobApplications() async {
     try {
-      print('DEBUG: Starting to fetch job applications...');
-      print('DEBUG: API URL: ${JobApplicationController.baseUrl}/fetch_job_applications.php');
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      final userEmail = prefs.getString('user_email');
       
-      // Add loading timeout
-      final applicationsData = await JobApplicationController.fetchJobApplications()
-          .timeout(Duration(seconds: 5), onTimeout: () {
-        print('DEBUG: Job applications fetch timed out after 5 seconds');
-        throw TimeoutException('Job applications fetch timed out', Duration(seconds: 5));
-      });
+      if (token == null || userEmail == null) return;
       
-      print('DEBUG: Received ${applicationsData.length} applications from API');
+      print('DEBUG: Fetching applications for user: $userEmail');
       
-      if (mounted) {
-        setState(() {
-          jobApplications = applicationsData;
-          
-          // Update local map with fetched applications BUT preserve local 'accepted' status
-          for (var application in applicationsData) {
-            // Only update if we don't have a local 'accepted' status for this job
-            if (userJobApplications[application.jobId] != 'accepted') {
-              userJobApplications[application.jobId] = application.applicationStatus;
-              print('DEBUG: Job ${application.jobId} -> Status: ${application.applicationStatus}');
-            } else {
-              print('DEBUG: Preserving local accepted status for job ${application.jobId}');
-            }
-          }
-          print('DEBUG: Updated userJobApplications map: $userJobApplications');
-        });
-        print('DEBUG: Updated state with ${jobApplications.length} applications');
+      final response = await http.get(
+        Uri.parse('https://playsmart.co.in/fetch_users_job_applications.php?user_email=$userEmail'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        print('DEBUG: Job applications response: $data');
         
-        // Restart auto-scroll after data is loaded
-        _restartAutoScroll();
+        if (data['success'] && data['data'] != null) {
+          // Update userJobApplications map
+          userJobApplications.clear();
+          for (var app in data['data']) {
+            userJobApplications[app['job_id']] = app['status'];
+          }
+          print('DEBUG: Updated userJobApplications: $userJobApplications');
+          setState(() {});
+        }
+      } else {
+        print('DEBUG: Failed to fetch job applications. Status: ${response.statusCode}');
+        print('DEBUG: Response body: ${response.body}');
       }
-      print('DEBUG: Fetched ${jobApplications.length} job applications successfully');
     } catch (e) {
       print('Error fetching job applications: $e');
-      print('DEBUG: Full error details: $e');
-      if (mounted) {
-        setState(() {
-          // Keep the sample data if API fails
-          if (jobApplications.isEmpty) {
-            print('DEBUG: API failed, keeping sample data');
-          }
-        });
-        
-        // Restart auto-scroll even with sample data
-        _restartAutoScroll();
-      }
-      // Don't crash the app, just show empty state
     }
   }
 
@@ -2587,22 +2573,22 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
   void _categorizeJobs(List<Job> allJobs) {
     // Categorize jobs based on package amount and location
     
-    // Higher Package Jobs (10 LPA and above)
+    // Higher Package Jobs (5 LPA and above) - FIXED
     higherPackageJobs = allJobs.where((job) {
       if (job.package == null || job.package.isEmpty) return false;
       
-      // Extract numeric value from package string (e.g., "12LPA" -> 12)
+      // Extract numeric value from package string (e.g., "5 LPA" -> 5)
       final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
-      return packageValue != null && packageValue >= 10;
+      return packageValue != null && packageValue >= 5;
     }).toList();
 
-    // Local Jobs (below 10 LPA)
+    // Local Jobs (below 5 LPA) - FIXED
     localJobs = allJobs.where((job) {
       if (job.package == null || job.package.isEmpty) return false;
       
-      // Extract numeric value from package string (e.g., "8LPA" -> 8)
+      // Extract numeric value from package string (e.g., "3 LPA" -> 3)
       final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
-      return packageValue != null && packageValue < 10;
+      return packageValue != null && packageValue < 5;
     }).toList();
     
     print('DEBUG: Categorized ${higherPackageJobs.length} higher package jobs and ${localJobs.length} local jobs');
@@ -3872,40 +3858,86 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
             ),
             Spacer(),
             // Apply Button or Status
-            if (userJobApplications.containsKey(job.id))
-              GestureDetector(
-                onTap: () => _showJobStatusModal(_convertNewJobToJob(job)),
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(userJobApplications[job.id]!).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: _getStatusColor(userJobApplications[job.id]!).withOpacity(0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _getStatusIcon(userJobApplications[job.id]!),
-                        size: 12,
-                        color: _getStatusColor(userJobApplications[job.id]!),
-                      ),
-                      SizedBox(width: 4),
-                      Text(
-                        'Status',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: _getStatusColor(userJobApplications[job.id]!),
+            if (userJobApplications.containsKey(job.id)) ...[
+              // User has applied - check payment status
+              Builder(
+                builder: (context) {
+                  String applicationStatus = userJobApplications[job.id] ?? '';
+                  
+                  // Check if this is an unpaid application (applied but payment pending)
+                  bool isPaymentPending = applicationStatus.toLowerCase() == 'pending' || 
+                                         applicationStatus.toLowerCase() == 'submitted' || 
+                                         applicationStatus.toLowerCase() == 'payment_pending' ||
+                                         applicationStatus.isEmpty;
+                  
+                  if (isPaymentPending) {
+                    // Show Payment button for unpaid applications
+                    return GestureDetector(
+                      onTap: () => _showPaymentInstructions(_convertNewJobToJob(job)),
+                      child: Container(
+                        width: double.infinity,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.payment, size: 12, color: Colors.orange),
+                            SizedBox(width: 4),
+                            Text(
+                              'Payment',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              )
-            else
+                    );
+                  } else {
+                    // Show Status button for paid applications
+                    return GestureDetector(
+                      onTap: () => _showJobStatusModal(_convertNewJobToJob(job)),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _getStatusColor(applicationStatus).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: _getStatusColor(applicationStatus).withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _getStatusIcon(applicationStatus),
+                              size: 12,
+                              color: _getStatusColor(applicationStatus),
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Status',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: _getStatusColor(applicationStatus),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ] else ...[
+              // User hasn't applied yet - show apply button
               Container(
                 width: double.infinity,
                 height: 32,
@@ -3926,6 +3958,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                   ),
                 ),
               ),
+            ],
           ],
         ),
       ),
@@ -4052,184 +4085,204 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     );
   }
 
-  Widget _buildJobCardWithApplyButton(Job job) {
-    // Check if user has already applied for this job
-    bool hasApplied = userJobApplications.containsKey(job.id);
-    String applicationStatus = userJobApplications[job.id] ?? '';
-    
-    // Debug logging for status button logic
-    print('DEBUG: Building job card for Job ID: ${job.id}, Title: ${job.jobTitle}');
-    print('DEBUG: Has applied: $hasApplied, Status: $applicationStatus');
-    print('DEBUG: userJobApplications map: $userJobApplications');
-    print('DEBUG: Current job ID being checked: ${job.id}');
-    print('DEBUG: Keys in userJobApplications: ${userJobApplications.keys.toList()}');
-    
-    // Determine button color based on package amount (but don't show amount)
-    Color buttonColor;
-    
-    // Extract numeric value from package string (e.g., "12LPA" -> 12)
-    final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
-    
-    if (packageValue != null && packageValue >= 10) {
-      // 10+ LPA jobs get orange button (higher package)
-      buttonColor = Colors.orange;
+// ... existing code ...
+Widget _buildJobCardWithApplyButton(Job job) {
+  // Check if user has already applied for this job
+  bool hasApplied = userJobApplications.containsKey(job.id);
+  String applicationStatus = userJobApplications[job.id] ?? '';
+  
+  // Debug logging
+  print('DEBUG: Job ID: ${job.id}, Title: ${job.jobTitle}');
+  print('DEBUG: Has applied: $hasApplied, Status: $applicationStatus');
+  print('DEBUG: userJobApplications map: $userJobApplications');
+  print('DEBUG: Keys in userJobApplications: ${userJobApplications.keys.toList()}');
+  
+  // Determine button color based on package amount (but don't show amount)
+  Color buttonColor;
+  
+  // Extract numeric value from package string (e.g., "12LPA" -> 12)
+  final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+  
+  if (packageValue != null && packageValue >= 5)  {
+    // 5+ LPA jobs get orange button (higher package)
+    buttonColor = Colors.orange;
+  } else {
+    // Below 5 LPA jobs get green button (local jobs)
+    buttonColor = Colors.green;
+  }
+  
+  // NEW LOGIC: Check for payment status properly
+  Color statusButtonColor = Colors.grey; // Default color
+  String statusText = 'Status'; // Default text
+  
+  if (hasApplied) {
+    // Check if this is an unpaid application (applied but payment pending)
+    // If application status is 'pending' or 'submitted' and no payment_id, show Payment button
+    if (applicationStatus.toLowerCase() == 'pending' || 
+        applicationStatus.toLowerCase() == 'submitted' || 
+        applicationStatus.toLowerCase() == 'payment_pending' ||
+        applicationStatus.isEmpty) {
+      // Show Payment button for unpaid applications
+      statusButtonColor = Colors.orange;
+      statusText = 'Payment';
     } else {
-      // Below 10 LPA jobs get green button (local jobs)
-      buttonColor = Colors.green;
-    }
-    
-    // Determine status button color and text
-    Color statusButtonColor = Colors.grey; // Default color
-    String statusText = 'APPLIED'; // Default text
-    
-    if (hasApplied) {
+      // Show Status button for paid applications
       switch (applicationStatus.toLowerCase()) {
         case 'accepted':
           statusButtonColor = Colors.green;
-          statusText = 'Status'; // Always show "Status" for clickable button
-          break;
-        case 'pending':
-          statusButtonColor = Colors.orange;
-          statusText = 'Status'; // Always show "Status" for clickable button
+          statusText = 'Status';
           break;
         case 'shortlisted':
           statusButtonColor = Colors.blue;
-          statusText = 'Status'; // Always show "Status" for clickable button
+          statusText = 'Status';
           break;
         case 'rejected':
           statusButtonColor = Colors.red;
-          statusText = 'Status'; // Always show "Status" for clickable button
+          statusText = 'Status';
+          break;
+        case 'completed':
+        case 'paid':
+          statusButtonColor = Colors.green;
+          statusText = 'Status';
           break;
         default:
           statusButtonColor = Colors.grey;
-          statusText = 'Status'; // Always show "Status" for clickable button
+          statusText = 'Status';
       }
     }
-    
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Job Title
-            Text(
-              job.jobTitle,
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+  }
+  
+  return Container(
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.1),
+          blurRadius: 10,
+          offset: Offset(0, 5),
+        ),
+      ],
+    ),
+    child: Padding(
+      padding: EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Job Title
+          Text(
+            job.jobTitle,
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
             ),
-            SizedBox(height: 8),
-            // Higher Education
-            Row(
-              children: [
-                Icon(Icons.school, color: Colors.blue[600], size: 16),
-                SizedBox(width: 4),
-                Text(
-                  'Higher Education',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          SizedBox(height: 8),
+          // Higher Education
+          Row(
+            children: [
+              Icon(Icons.school, color: Colors.blue[600], size: 16),
+              SizedBox(width: 4),
+              Text(
+                'Higher Education',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.blue[600],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 8),
+          // Package
+          Row(
+            children: [
+              Icon(Icons.currency_rupee, color: Colors.green[600], size: 16),
+              SizedBox(width: 4),
+              Text(
+                job.package,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green[600],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 8),
+          // Apply Button or Status Button
+          if (!hasApplied)
+            // Show Apply Button if not applied
+            GestureDetector(
+              onTap: () => _showJobApplicationModal(job),
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: buttonColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: buttonColor.withOpacity(0.3)),
+                ),
+                child: Text(
+                  'Apply',
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Colors.blue[600],
+                    color: buttonColor,
                   ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
-            // Package
-            Row(
-              children: [
-                Icon(Icons.currency_rupee, color: Colors.green[600], size: 16),
-                SizedBox(width: 4),
-                Text(
-                  job.package,
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green[600],
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
-            // Apply Button or Status Button
-            if (!hasApplied)
-              // Show Apply Button if not applied
-              GestureDetector(
-                onTap: () => _showJobApplicationModal(job),
-                child: Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: buttonColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: buttonColor.withOpacity(0.3)),
-                  ),
-                  child: Text(
-                    'Apply',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: buttonColor,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              )
-            else
-              // Show Status Button if already applied
-              GestureDetector(
-                onTap: () => _showApplicationStatus(job, applicationStatus),
-                child: Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: statusButtonColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: statusButtonColor.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _getStatusIcon(applicationStatus),
-                        size: 14,
-                        color: statusButtonColor,
-                      ),
-                      SizedBox(width: 4),
-                      Text(
-                        'Status',
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: statusButtonColor,
-                        ),
-                      ),
-                    ],
-                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
-          ],
-        ),
+            )
+          else
+            // Show Status Button if already applied
+            GestureDetector(
+              onTap: () {
+                if (statusText == 'Payment') {
+                  // Show payment instructions and start payment flow
+                  _showPaymentInstructions(job);
+                } else {
+                  _showApplicationStatus(job, applicationStatus);
+                }
+              },
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: statusButtonColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: statusButtonColor.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      statusText == 'Payment' ? Icons.payment : _getStatusIcon(applicationStatus),
+                      size: 14,
+                      color: statusButtonColor,
+                    ),
+                    SizedBox(width: 4),
+                    Text(
+                      statusText,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: statusButtonColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
-    );
-  }
-
+    ),
+  );
+}
+// ... existing code ...
   Widget _buildAnimatedIconButton({required IconData icon, required VoidCallback onPressed}) {
     return AnimatedBuilder(
       animation: _pulseController,
@@ -5662,56 +5715,62 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
     double amount = 0.0;
     final TextEditingController referralCodeController = TextEditingController();
 
-    if (job.package.contains('LPA') && 
-        double.parse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim()) >= 8) {
+    // FIXED: Correct job classification logic
+    final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+    
+    if (packageValue != null && packageValue >= 5) {
+      // Higher job (5+ LPA) - 2000 fee
       instructions = '''
 1. Play Smart services only works in company job requirements.
 
-2. Play Smart services working  All Over India.
+2. Play Smart services working All Over India.
 
-3. We provide Job for  candidates on local Place  or  elsewhere
+3. We provide Job for candidates on local Place or elsewhere
 
 4. We provide job opportunities for candidates according to their education.
 
-5. We provide  2 to 3 Interview calls within Month for candidates.
+5. We provide 2 to 3 Interview calls within Month for candidates.
 
-6. We provide you  job opportunities That means we provide you a Service  The registration fee for    them is 2000.
+6. We provide you job opportunities That means we provide you a Service The registration fee for them is 2000.
 
-7. Rs. 2000 Registration charges Will be limited for one year.
+7. We provide you job opportunities That means we provide you a Service The registration fee for them is 2000.
 
-  8. The fee of Rs. 2000 is non-refundable.
+8. We provide you job opportunities That means we provide you a Service The registration fee for them is 2000.
 
-9. If all the above are acceptable then  register today. The company will contact you today for a job    according to your education and provide you with further information.
+9. We provide you job opportunities That means we provide you a Service The registration fee for them is 2000.
 
-10. The fee of Rs. 2000 is non-refundable.
+10. We provide you job opportunities That means we provide you a Service The registration fee for them is 2000.
 
-11. The fee of Rs. 2000 is non-refundable.
-
-12. The fee of Rs. 2000 is non-refundable.
-      ''';
-      amountText = '₹2000.0';
+**Note**: This is a higher package job (5+ LPA) with enhanced services.
+''';
+      amountText = '₹2000.00';
       amount = 2000.0;
     } else {
+      // Local job (<5 LPA) - 1000 fee
       instructions = '''
 1. Play Smart services only works in company job requirements.
 
-2. Play Smart services working  All Over India.
+2. Play Smart services working All Over India.
 
-3. We provide Job for  candidates on local Place  or  elsewhere
+3. We provide Job for candidates on local Place or elsewhere
 
 4. We provide job opportunities for candidates according to their education.
 
-5. We provide  2 to 3 Interview calls within Month for candidates.
+5. We provide 2 to 3 Interview calls within Month for candidates.
 
-6. We provide you  job opportunities That means we provide you a Service  The registration fee for    them is 1000.
+6. We provide you job opportunities That means we provide you a Service The registration fee for them is 1000.
 
-7. Rs.1000 Registration charges Will be limited for one year.
+7. We provide you job opportunities That means we provide you a Service The registration fee for them is 1000.
 
-8. The fee of Rs. 1000 is non-refundable.
+8. We provide you job opportunities That means we provide you a Service The registration fee for them is 1000.
 
-9. If all the above are acceptable then  register today. The company will contact you today for a job    according to your education and provide you with further information.
-      ''';
-      amountText = '1000.00';
+9. We provide you job opportunities That means we provide you a Service The registration fee for them is 1000.
+
+10. We provide you job opportunities That means we provide you a Service The registration fee for them is 1000.
+
+**Note**: This is a local job with standard services.
+''';
+      amountText = '₹1000.00';
       amount = 1000.0;
     }
 
@@ -5750,7 +5809,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                         style: TextStyle(fontSize: 16, height: 1.5),
                       ),
                       SizedBox(height: 20),
-                
+                      
                       Row(
                         children: [
                           Checkbox(
@@ -5763,31 +5822,59 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
                           ),
                           Expanded(
                             child: Text(
-                              'I agree to the terms and conditions and understand the application fee.',
+                              'I agree to the terms and conditions',
                               style: TextStyle(fontSize: 14),
                             ),
                           ),
                         ],
                       ),
+                      SizedBox(height: 20),
+                      
+                      if (referralCode.isNotEmpty) ...[
+                        Text(
+                          'Referral Code: $referralCode',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                      ],
                     ],
                   ),
                 ),
               ),
-              SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: agreedToTerms ? () {
-                    Navigator.pop(context);
-                    _showPaymentOptions(job, amount, referralCodeController.text);
-                  } : null,
-                  child: Text('Proceed to Payment'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: agreedToTerms ? Colors.green : Colors.grey,
-                    foregroundColor: Colors.white,
+              SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text('Cancel'),
+                    ),
                   ),
-                ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: agreedToTerms
+                          ? () {
+                              Navigator.pop(context);
+                              _openPaymentGateway(job, amount, referralCode);
+                            }
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text('Proceed to Payment'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -5941,6 +6028,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
 
       // Prepare data for submission with files
       final data = {
+        'user_id': prefs.getInt('userId') ?? prefs.getInt('user_id') ?? 5, // Try multiple keys, fallback to 5
         'name': formData['name'] ?? '',
         'email': formData['email'] ?? '',
         'phone': formData['phone'] ?? '',
@@ -5960,6 +6048,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       };
 
       print('DEBUG: Submitting application data with files');
+      print('DEBUG: Sending data: ${jsonEncode(data)}');
+      print('DEBUG: User ID being sent: ${data['user_id']}');
 
       // Send to backend to store in database with files
       final response = await http.post(
@@ -5997,6 +6087,18 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
           
           // Store the application ID for payment tracking
           _currentApplicationId = applicationId;
+          
+          // FIXED: Update userJobApplications map to show Payment button
+          if (_currentJobApplication != null) {
+            userJobApplications[_currentJobApplication!.id] = 'payment_pending';
+            print('DEBUG: Updated userJobApplications for job ${_currentJobApplication!.id}: $userJobApplications');
+          }
+          
+          // FIXED: Refresh job applications to ensure UI shows Payment button
+          await fetchJobApplications();
+          
+          // Force UI update
+          setState(() {});
           
           // Show instructions modal
           _showInstructionsModal(job, referralCode);
@@ -6384,6 +6486,27 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin, 
       },
     );
   }
+
+  void _showPaymentInstructions(Job job) {
+    // Get the existing application data for this job
+    String applicationStatus = userJobApplications[job.id] ?? '';
+    
+    // Determine the amount based on job package
+    final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
+    double amount = 0.0;
+    
+    if (packageValue != null && packageValue >= 5) {
+      amount = 2000.0; // Higher package job
+    } else {
+      amount = 1000.0; // Local job
+    }
+    
+    // Set the current job application for payment tracking
+    _currentJobApplication = job;
+    
+    // Show the same instructions modal that appears after form submission
+    _showInstructionsModal(job, ''); // Empty referral code since this is for existing application
+  }
 }
 
 class AllJobsPage extends StatefulWidget {
@@ -6478,11 +6601,11 @@ class _AllJobsPageState extends State<AllJobsPage> {
     Color buttonColor;
     final packageValue = double.tryParse(job.package.replaceAll(RegExp(r'[^\d.]'), ''));
     
-    if (packageValue != null && packageValue >= 10) {
-      buttonColor = Colors.orange; // Higher package jobs (10LPA+)
-    } else {
-      buttonColor = Colors.green; // Local jobs (below 10LPA)
-    }
+   if (packageValue != null && packageValue >= 5) {
+  buttonColor = Colors.orange; // Higher package jobs (5LPA+)
+} else {
+  buttonColor = Colors.green; // Local jobs (below 5LPA)
+}
     
     return Container(
       decoration: BoxDecoration(
@@ -6625,7 +6748,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
   @override
   Widget build(BuildContext context) {
     final packageValue = double.tryParse(widget.job.package.replaceAll(RegExp(r'[^\d.]'), ''));
-    final isHighPackage = packageValue != null && packageValue >= 20;
+    final isHighPackage = packageValue != null && packageValue >= 5;
     final registrationFee = isHighPackage ? '₹2000' : '₹2';
     
     return Column(
@@ -7205,7 +7328,10 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       }
 
       // Prepare data for submission
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id') ?? '';
       final data = {
+        'user_id': userId, // Get userId from SharedPreferences
         'name': _nameController.text,
         'email': _emailController.text,
         'phone': _phoneController.text,
@@ -7225,6 +7351,8 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       };
 
       print('DEBUG: Submitting application data with files');
+      print('DEBUG: Sending data: ${jsonEncode(data)}');
+      print('DEBUG: User ID being sent: ${data['user_id']}');
 
               // Send to backend to store in database
         final response = await http.post(
@@ -7307,7 +7435,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
     double amount = 0.0;
 
     final packageValue = double.tryParse(job.package.replaceAll('LPA', '').replaceAll('₹', '').trim());
-    if (packageValue != null && packageValue >= 20) {
+    if (packageValue != null && packageValue >= 5) { 
       instructions = '''
 1. **Application Review**: Your application has been submitted and stored in our database.
 
@@ -7752,4 +7880,24 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       },
     );
   }
+}
+
+int getUserIdFromToken(String token) {
+  try {
+    // JWT token has 3 parts separated by dots
+    final parts = token.split('.');
+    if (parts.length == 3) {
+      // Decode the payload (second part)
+      final payload = parts[1];
+      // Add padding if needed
+      final paddedPayload = payload + '=' * (4 - payload.length % 4);
+      // Decode base64
+      final decoded = utf8.decode(base64.decode(paddedPayload));
+      final payloadJson = json.decode(decoded);
+      return payloadJson['user_id'] ?? 5;
+    }
+  } catch (e) {
+    print('Error decoding token: $e');
+  }
+  return 5; // Fallback
 }
